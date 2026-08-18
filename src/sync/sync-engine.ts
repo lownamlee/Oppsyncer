@@ -71,7 +71,7 @@ export default class SyncEngine {
   async sync(_trigger: SyncTrigger): Promise<SyncOutcome> {
     const settings = this.getSettings();
     if (!settingsAreConfigured(settings)) {
-      throw new Error("ObSyncer is not configured.");
+      throw new Error("Oppsyncer is not configured.");
     }
 
     const client = new GitHubClient(settings);
@@ -120,7 +120,7 @@ export default class SyncEngine {
         );
       case "remote-missing":
         throw new Error(
-          "The configured remote branch disappeared after synchronization was established. ObSyncer will not recreate it automatically.",
+          "The configured remote branch disappeared after synchronization was established. Oppsyncer will not recreate it automatically.",
         );
       case "idle":
         return { kind: "idle" };
@@ -146,7 +146,7 @@ export default class SyncEngine {
     const initialSha = await client.createInitialFile(
       firstPath,
       firstBytes,
-      `ObSyncer: initialize from ${settings.deviceName}`,
+      `Oppsyncer: initialize from ${settings.deviceName}`,
     );
 
     let head = await this.waitForBranchHead(client);
@@ -170,7 +170,7 @@ export default class SyncEngine {
       local,
       initialRemote,
       head,
-      `ObSyncer: initial vault snapshot from ${settings.deviceName}`,
+      `Oppsyncer: initial vault snapshot from ${settings.deviceName}`,
     );
     await client.updateMainWithoutForce(candidate.commitSha);
     await this.recordBaseline(
@@ -194,7 +194,7 @@ export default class SyncEngine {
       local,
       remote,
       remote.commitSha,
-      `ObSyncer: sync from ${settings.deviceName}`,
+      `Oppsyncer: sync from ${settings.deviceName}`,
     );
 
     try {
@@ -241,7 +241,7 @@ export default class SyncEngine {
         local,
         remote,
         state.baselineCommitSha,
-        `ObSyncer recovery: ${settings.deviceName}`,
+        `Oppsyncer recovery: ${settings.deviceName}`,
       );
     } catch (error) {
       if (!(error instanceof GitHubApiError) || ![404, 422].includes(error.status)) {
@@ -252,7 +252,7 @@ export default class SyncEngine {
         local,
         remote,
         remote.commitSha,
-        `ObSyncer recovery after rewritten history: ${settings.deviceName}`,
+        `Oppsyncer recovery after rewritten history: ${settings.deviceName}`,
       );
     }
 

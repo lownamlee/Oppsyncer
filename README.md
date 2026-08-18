@@ -1,18 +1,18 @@
-# ObSyncer
+# Oppsyncer
 
-ObSyncer is a small Obsidian plugin that synchronizes a vault through a private
+Oppsyncer is a small Obsidian plugin that synchronizes a vault through a private
 GitHub repository on desktop and mobile without requiring a local Git binary.
 
 It is designed for one person who edits one device at a time but wants protection
 from delayed polling, offline edits, or an accidentally stale second device.
 
-> **Public beta:** version 0.2.0 is under active development. Test with a
+> **Public beta:** version 0.2.1 is under active development. Test with a
 > disposable vault and repository before trusting it with primary notes.
 
 ## The synchronization rule
 
 The first device that successfully advances the remote `main` branch wins.
-ObSyncer never force-pushes `main` and does not create merge commits.
+Oppsyncer never force-pushes `main` and does not create merge commits.
 
 If two devices start from commit `A`, mobile pushes `B`, and desktop has an
 unpublished edit `C`, desktop performs this sequence:
@@ -33,7 +33,7 @@ recovery branch.
 - No local overwrite until a recovery ref is created and read back successfully.
 - One synchronization operation at a time; triggers are coalesced.
 - Local changes are detected by content scan, not only by editor events.
-- `.obsidian` synchronization is opt-in. ObSyncer's credential/state file,
+- `.obsidian` synchronization is opt-in. Oppsyncer's credential/state file,
   workspaces, caches, file-recovery state, Obsidian Sync configuration, legacy
   sync metadata, SQLite sidecars, `.git/**`, Git control files, and `.trash/**`
   are never synchronized.
@@ -72,33 +72,33 @@ those paths under **Additional exclusions** before enabling configuration sync.
 
 ## Initial setup
 
-ObSyncer requires a private GitHub repository and a fine-grained GitHub token
+Oppsyncer requires a private GitHub repository and a fine-grained GitHub token
 limited to that repository with **Contents: Read and write**.
 
-1. Install and enable ObSyncer on the device that already contains your notes.
-2. Open **Settings → ObSyncer**, enter the token, repository owner, repository
+1. Install and enable Oppsyncer on the device that already contains your notes.
+2. Open **Settings → Oppsyncer**, enter the token, repository owner, repository
    name, branch, and a recognizable device name.
 3. Select **Test**, then **Sync now**. Use an empty GitHub repository for this
    first upload.
-4. Install ObSyncer on the second device and enter the same repository details
+4. Install Oppsyncer on the second device and enter the same repository details
    with a different device name. Start with an empty vault, then select
    **Sync now** to download the remote vault.
-5. Leave **Automatic synchronization** enabled. ObSyncer syncs after local edits
+5. Leave **Automatic synchronization** enabled. Oppsyncer syncs after local edits
    settle and polls for remote changes while the app is active.
 
 The first setup must have one empty side:
 
-- Existing vault + empty GitHub repository: ObSyncer initializes the remote.
-- Empty vault + populated GitHub repository: ObSyncer downloads the remote.
-- Existing vault + populated repository without an ObSyncer baseline: ObSyncer
+- Existing vault + empty GitHub repository: Oppsyncer initializes the remote.
+- Empty vault + populated GitHub repository: Oppsyncer downloads the remote.
+- Existing vault + populated repository without an Oppsyncer baseline: Oppsyncer
   stops and changes nothing.
 
-Do not run ObSyncer together with Obsidian Git, GitHub Gitless Sync, Obsidian
+Do not run Oppsyncer together with Obsidian Git, GitHub Gitless Sync, Obsidian
 Sync, Syncthing, or another tool that writes the same vault.
 
 ## Data and privacy disclosures
 
-- **Account and network access:** ObSyncer requires a GitHub account and sends
+- **Account and network access:** Oppsyncer requires a GitHub account and sends
   requests to `api.github.com` for only the repository configured in its
   settings. The recovery command can open the configured repository on
   `github.com`.
@@ -107,10 +107,10 @@ Sync, Syncthing, or another tool that writes the same vault.
   Obsidian configuration directory through Obsidian's adapter API. It does not
   access files outside the vault.
 - **Credential storage:** The fine-grained GitHub token is stored locally using
-  Obsidian's plugin data API. The field is masked in settings and ObSyncer's data
+  Obsidian's plugin data API. The field is masked in settings and Oppsyncer's data
   file is permanently excluded from synchronization, but the token is not
   encrypted at rest by this plugin.
-- **No tracking or monetization:** ObSyncer contains no telemetry, analytics,
+- **No tracking or monetization:** Oppsyncer contains no telemetry, analytics,
   advertisements, payments, or paid features.
 
 ## Development
@@ -134,6 +134,6 @@ The production build produces `main.js`. For manual installation, copy
 
 ## License and attribution
 
-ObSyncer is a fork of
+Oppsyncer is a fork of
 [GitHub Gitless Sync](https://github.com/silvanocerza/github-gitless-sync) by
 Silvano Cerza. It remains licensed under AGPL-3.0-only; see [LICENSE](LICENSE).

@@ -10,7 +10,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("p", {
-      text: "The first device that advances the remote wins. If another device has stale local edits, ObSyncer saves them to a recovery branch before adopting the remote.",
+      text: "The first device that advances the remote wins. If another device has stale local edits, Oppsyncer saves them to a recovery branch before adopting the remote.",
     });
 
     new Setting(containerEl).setName("GitHub repository").setHeading();
@@ -102,7 +102,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Sync Obsidian configuration")
       .setDesc(
-        "Sync safe files under the vault's .obsidian folder. Device workspace state, ObSyncer credentials/state, caches, legacy sync metadata, and SQLite temporary files remain excluded.",
+        "Sync safe files under the vault's .obsidian folder. Device workspace state, Oppsyncer credentials/state, caches, legacy sync metadata, and SQLite temporary files remain excluded.",
       )
       .addToggle((toggle) =>
         toggle
@@ -192,7 +192,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl).setName("Safety").setHeading();
     containerEl.createEl("p", {
-      text: "ObSyncer never force-updates main, never synchronizes its token/state file, and never replaces dirty local content until a recovery branch is created and verified. It cannot sync while a mobile operating system has suspended Obsidian.",
+      text: "Oppsyncer never force-updates main, never synchronizes its token/state file, and never replaces dirty local content until a recovery branch is created and verified. It cannot sync while a mobile operating system has suspended Obsidian.",
     });
   }
 }

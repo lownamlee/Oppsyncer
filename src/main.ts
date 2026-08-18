@@ -107,9 +107,9 @@ export default class ObSyncerPlugin extends Plugin {
   async testConnection(): Promise<void> {
     try {
       const repository = await this.engine.testConnection();
-      new Notice(`ObSyncer connected to ${repository}.`);
+      new Notice(`Oppsyncer connected to ${repository}.`);
     } catch (error) {
-      new Notice(`ObSyncer connection failed: ${messageOf(error)}`, 0);
+      new Notice(`Oppsyncer connection failed: ${messageOf(error)}`, 0);
     }
   }
 
@@ -129,7 +129,7 @@ export default class ObSyncerPlugin extends Plugin {
   openLastRecoveryBranch(): void {
     const url = this.getRecoveryUrl();
     if (!url) {
-      new Notice("ObSyncer has no recovery branch yet.");
+      new Notice("Oppsyncer has no recovery branch yet.");
       return;
     }
     window.open(url, "_blank");
@@ -219,7 +219,7 @@ export default class ObSyncerPlugin extends Plugin {
   private async performSync(trigger: SyncTrigger): Promise<void> {
     if (!settingsAreConfigured(this.data.settings)) {
       this.setStatus("unconfigured", "Configure GitHub access in settings");
-      if (trigger === "manual") new Notice("Configure ObSyncer first.");
+      if (trigger === "manual") new Notice("Configure Oppsyncer first.");
       return;
     }
 
@@ -232,7 +232,7 @@ export default class ObSyncerPlugin extends Plugin {
       const message = messageOf(error);
       this.setStatus("error", message);
       if (trigger === "manual" || message !== this.lastReportedError) {
-        new Notice(`ObSyncer: ${message}`, trigger === "manual" ? 0 : 8000);
+        new Notice(`Oppsyncer: ${message}`, trigger === "manual" ? 0 : 8000);
       }
       this.lastReportedError = message;
     }
@@ -242,7 +242,7 @@ export default class ObSyncerPlugin extends Plugin {
     if (outcome.kind === "recovered" && outcome.recoveryRef) {
       this.setStatus("recovery", `Recovered local work to ${outcome.recoveryRef}`);
       new Notice(
-        `ObSyncer kept the remote winner. Your local version is safe on ${outcome.recoveryRef}.`,
+        `Oppsyncer kept the remote winner. Your local version is safe on ${outcome.recoveryRef}.`,
         0,
       );
       return;
@@ -259,7 +259,7 @@ export default class ObSyncerPlugin extends Plugin {
     };
     this.setStatus("idle", detail[outcome.kind]);
     if (trigger === "manual" || outcome.kind === "initialized") {
-      new Notice(`ObSyncer: ${detail[outcome.kind]}.`);
+      new Notice(`Oppsyncer: ${detail[outcome.kind]}.`);
     }
   }
 
@@ -295,13 +295,13 @@ export default class ObSyncerPlugin extends Plugin {
   private renderStatus(): void {
     if (!this.statusBar) return;
     const labels: Record<SyncUiStatus, string> = {
-      unconfigured: "ObSyncer: setup",
-      paused: "ObSyncer: paused",
-      idle: "ObSyncer: synced",
-      pending: "ObSyncer: pending",
-      syncing: "ObSyncer: syncing…",
-      recovery: "ObSyncer: recovered",
-      error: "ObSyncer: error",
+      unconfigured: "Oppsyncer: setup",
+      paused: "Oppsyncer: paused",
+      idle: "Oppsyncer: synced",
+      pending: "Oppsyncer: pending",
+      syncing: "Oppsyncer: syncing…",
+      recovery: "Oppsyncer: recovered",
+      error: "Oppsyncer: error",
     };
     this.statusBar.setText(labels[this.status]);
     this.statusBar.setAttribute("aria-label", this.statusDetail);

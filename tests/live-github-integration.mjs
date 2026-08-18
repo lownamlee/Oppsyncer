@@ -16,7 +16,7 @@ try {
     body: {
       name: repositoryName,
       private: true,
-      description: "Disposable ObSyncer API integration test",
+      description: "Disposable Oppsyncer API integration test",
     },
     expected: [201],
   });
