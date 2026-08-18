@@ -6,7 +6,7 @@ GitHub repository on desktop and mobile without requiring a local Git binary.
 It is designed for one person who edits one device at a time but wants protection
 from delayed polling, offline edits, or an accidentally stale second device.
 
-> **Alpha software:** version 0.1.0 is under active development. Test with a
+> **Public beta:** version 0.2.0 is under active development. Test with a
 > disposable vault and repository before trusting it with primary notes.
 
 ## The synchronization rule
@@ -72,8 +72,19 @@ those paths under **Additional exclusions** before enabling configuration sync.
 
 ## Initial setup
 
-Use a fine-grained GitHub token limited to one private repository with
-**Contents: Read and write**.
+ObSyncer requires a private GitHub repository and a fine-grained GitHub token
+limited to that repository with **Contents: Read and write**.
+
+1. Install and enable ObSyncer on the device that already contains your notes.
+2. Open **Settings → ObSyncer**, enter the token, repository owner, repository
+   name, branch, and a recognizable device name.
+3. Select **Test**, then **Sync now**. Use an empty GitHub repository for this
+   first upload.
+4. Install ObSyncer on the second device and enter the same repository details
+   with a different device name. Start with an empty vault, then select
+   **Sync now** to download the remote vault.
+5. Leave **Automatic synchronization** enabled. ObSyncer syncs after local edits
+   settle and polls for remote changes while the app is active.
 
 The first setup must have one empty side:
 
@@ -84,6 +95,23 @@ The first setup must have one empty side:
 
 Do not run ObSyncer together with Obsidian Git, GitHub Gitless Sync, Obsidian
 Sync, Syncthing, or another tool that writes the same vault.
+
+## Data and privacy disclosures
+
+- **Account and network access:** ObSyncer requires a GitHub account and sends
+  requests to `api.github.com` for only the repository configured in its
+  settings. The recovery command can open the configured repository on
+  `github.com`.
+- **Vault access:** The plugin reads and writes included files inside the active
+  vault. If configuration sync is enabled, it also accesses the vault's actual
+  Obsidian configuration directory through Obsidian's adapter API. It does not
+  access files outside the vault.
+- **Credential storage:** The fine-grained GitHub token is stored locally using
+  Obsidian's plugin data API. The field is masked in settings and ObSyncer's data
+  file is permanently excluded from synchronization, but the token is not
+  encrypted at rest by this plugin.
+- **No tracking or monetization:** ObSyncer contains no telemetry, analytics,
+  advertisements, payments, or paid features.
 
 ## Development
 

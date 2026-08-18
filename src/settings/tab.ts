@@ -9,12 +9,11 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "ObSyncer" });
     containerEl.createEl("p", {
       text: "The first device that advances the remote wins. If another device has stale local edits, ObSyncer saves them to a recovery branch before adopting the remote.",
     });
 
-    containerEl.createEl("h3", { text: "GitHub repository" });
+    new Setting(containerEl).setName("GitHub repository").setHeading();
     new Setting(containerEl)
       .setName("Fine-grained access token")
       .setDesc("Limit the token to this private vault repository with Contents: Read and write.")
@@ -75,7 +74,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
         button.setButtonText("Test").onClick(async () => this.plugin.testConnection()),
       );
 
-    containerEl.createEl("h3", { text: "Synchronization" });
+    new Setting(containerEl).setName("Synchronization").setHeading();
     new Setting(containerEl)
       .setName("Device name")
       .setDesc("Used in commits and recovery branch names.")
@@ -191,7 +190,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
           .onClick(() => this.plugin.openLastRecoveryBranch()),
       );
 
-    containerEl.createEl("h3", { text: "Safety" });
+    new Setting(containerEl).setName("Safety").setHeading();
     containerEl.createEl("p", {
       text: "ObSyncer never force-updates main, never synchronizes its token/state file, and never replaces dirty local content until a recovery branch is created and verified. It cannot sync while a mobile operating system has suspended Obsidian.",
     });

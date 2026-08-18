@@ -28,6 +28,7 @@ interface CandidateCommit {
 
 export interface SyncEngineOptions {
   vault: Vault;
+  trashFile: (file: TFile) => Promise<void>;
   getSettings: () => ObSyncerSettings;
   getState: () => ObSyncerState;
   saveState: (state: ObSyncerState) => Promise<void>;
@@ -36,6 +37,7 @@ export interface SyncEngineOptions {
 
 export default class SyncEngine {
   private readonly vault: Vault;
+  private readonly trashFile: (file: TFile) => Promise<void>;
   private readonly getSettings: () => ObSyncerSettings;
   private readonly getState: () => ObSyncerState;
   private readonly saveState: (state: ObSyncerState) => Promise<void>;
@@ -43,6 +45,7 @@ export default class SyncEngine {
 
   constructor(options: SyncEngineOptions) {
     this.vault = options.vault;
+    this.trashFile = options.trashFile;
     this.getSettings = options.getSettings;
     this.getState = options.getState;
     this.saveState = options.saveState;
@@ -555,7 +558,7 @@ export default class SyncEngine {
 
     const existing = this.vault.getAbstractFileByPath(path);
     if (existing instanceof TFile) {
-      await this.vault.delete(existing, true);
+      await this.trashFile(existing);
     } else if (existing) {
       throw new Error(`Cannot delete a folder as though it were a file: ${path}`);
     }

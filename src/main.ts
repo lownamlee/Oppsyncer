@@ -38,6 +38,7 @@ export default class ObSyncerPlugin extends Plugin {
 
     this.engine = new SyncEngine({
       vault: this.app.vault,
+      trashFile: (file) => this.app.fileManager.trashFile(file),
       getSettings: () => this.data.settings,
       getState: () => this.data.state,
       saveState: async (state) => {
