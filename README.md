@@ -6,7 +6,7 @@ GitHub repository on desktop and mobile without requiring a local Git binary.
 It is designed for one person who edits one device at a time but wants protection
 from delayed polling, offline edits, or an accidentally stale second device.
 
-> **Public beta:** version 0.2.1 is under active development. Test with a
+> **Public beta:** Oppsyncer is under active development. Test with a
 > disposable vault and repository before trusting it with primary notes.
 
 ## The synchronization rule
@@ -117,8 +117,7 @@ Sync, Syncthing, or another tool that writes the same vault.
 
 ```shell
 pnpm install
-pnpm test
-pnpm build
+pnpm run check
 ```
 
 Maintainers can run `pnpm test:github-live` while authenticated with GitHub CLI.
