@@ -1,6 +1,6 @@
 {
   "name": "obsyncer",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Deterministic GitHub synchronization for Obsidian with automatic recovery snapshots",
   "main": "main.js",
   "scripts": {

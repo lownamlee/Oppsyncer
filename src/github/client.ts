@@ -2,6 +2,7 @@ import { requestUrl, RequestUrlResponse } from "obsidian";
 import { ObSyncerSettings } from "../settings/settings";
 import { RemoteFileState, RemoteSnapshot } from "../model";
 import { base64ToBytes, bytesToBase64, sleep } from "../utils";
+import { addNoCacheQuery } from "./cache";
 
 const API_VERSION = "2022-11-28";
 const MAX_ATTEMPTS = 3;
@@ -31,6 +32,8 @@ export class GitHubApiError extends Error {
 }
 
 export default class GitHubClient {
+  private requestSequence = 0;
+
   constructor(private readonly settings: ObSyncerSettings) {}
 
   async getRepository(): Promise<RepositoryInfo> {
@@ -194,9 +197,13 @@ export default class GitHubClient {
     path: string,
     body?: object,
   ): Promise<RequestUrlResponse> {
+    const requestPath =
+      method === "GET"
+        ? addNoCacheQuery(path, Date.now(), ++this.requestSequence)
+        : path;
     const url = `https://api.github.com/repos/${encodeURIComponent(
       this.settings.githubOwner,
-    )}/${encodeURIComponent(this.settings.githubRepo)}${path}`;
+    )}/${encodeURIComponent(this.settings.githubRepo)}${requestPath}`;
 
     let lastError: unknown;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -209,6 +216,8 @@ export default class GitHubClient {
             Authorization: `Bearer ${this.settings.githubToken}`,
             "X-GitHub-Api-Version": API_VERSION,
             "Content-Type": "application/json",
+            "Cache-Control": "no-cache, no-store, max-age=0",
+            Pragma: "no-cache",
           },
           body: body ? JSON.stringify(body) : undefined,
           throw: false,
