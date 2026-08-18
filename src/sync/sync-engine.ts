@@ -8,12 +8,11 @@ import {
   ObSyncerState,
   RemoteSnapshot,
   SyncOutcome,
-  SyncTrigger,
 } from "../model";
 import { ObSyncerSettings, settingsAreConfigured } from "../settings/settings";
 import { gitBlobSha } from "../hash";
 import { mapLimit } from "../map-limit";
-import { shortSha, sleep } from "../utils";
+import { shortSha, sleep, toArrayBuffer } from "../utils";
 import { scanLocalVault, shaMap, shaMapsEqual } from "./local-snapshot";
 import { assertSafeRemotePath, isIncludedPath } from "./path-filter";
 import { decideSyncAction } from "./state-machine";
@@ -68,7 +67,7 @@ export default class SyncEngine {
     return repository.fullName;
   }
 
-  async sync(_trigger: SyncTrigger): Promise<SyncOutcome> {
+  async sync(): Promise<SyncOutcome> {
     const settings = this.getSettings();
     if (!settingsAreConfigured(settings)) {
       throw new Error("Oppsyncer is not configured.");
@@ -422,12 +421,8 @@ export default class SyncEngine {
     try {
       for (const { file, bytes } of downloads) {
         await this.ensureParentFolder(file.path);
-        const exact = bytes.buffer.slice(
-          bytes.byteOffset,
-          bytes.byteOffset + bytes.byteLength,
-        ) as ArrayBuffer;
         const path = normalizePath(file.path);
-        await this.writeLocalFile(path, exact);
+        await this.writeLocalFile(path, toArrayBuffer(bytes));
       }
       for (const path of deletions) {
         await this.deleteLocalFile(normalizePath(path));

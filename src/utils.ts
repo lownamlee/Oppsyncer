@@ -1,11 +1,11 @@
 import { arrayBufferToBase64, base64ToArrayBuffer } from "obsidian";
 
 export function bytesToBase64(bytes: Uint8Array): string {
-  const exact = bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer;
-  return arrayBufferToBase64(exact);
+  return arrayBufferToBase64(toArrayBuffer(bytes));
+}
+
+export function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return Uint8Array.from(bytes).buffer;
 }
 
 export function base64ToBytes(value: string): Uint8Array {

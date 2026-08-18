@@ -7,7 +7,6 @@ import {
 import {
   normalizeData,
   ObSyncerData,
-  ObSyncerState,
   SyncOutcome,
   SyncTrigger,
   SyncUiStatus,
@@ -17,8 +16,8 @@ import { settingsAreConfigured } from "./settings/settings";
 import SyncEngine from "./sync/sync-engine";
 
 export default class ObSyncerPlugin extends Plugin {
-  data: ObSyncerData;
-  private engine: SyncEngine;
+  data!: ObSyncerData;
+  private engine!: SyncEngine;
   private statusBar: HTMLElement | null = null;
   private status: SyncUiStatus = "unconfigured";
   private statusDetail = "";
@@ -225,7 +224,7 @@ export default class ObSyncerPlugin extends Plugin {
 
     this.setStatus("syncing", `Running ${trigger} synchronization`);
     try {
-      const outcome = await this.engine.sync(trigger);
+      const outcome = await this.engine.sync();
       this.lastReportedError = "";
       this.handleOutcome(outcome, trigger);
     } catch (error) {

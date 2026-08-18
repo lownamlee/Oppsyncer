@@ -1,24 +1,28 @@
 {
   "name": "obsyncer",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Deterministic GitHub synchronization for Obsidian with automatic recovery snapshots",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "lint": "eslint src tests",
     "version": "node version-bump.mjs",
     "test": "tsx --test tests/*.test.ts",
     "test:github-live": "node tests/live-github-integration.mjs",
-    "check": "npm run test && npm run build"
+    "check": "npm run lint && npm run test && npm run build"
   },
   "keywords": [],
   "author": "Low Nam Lee; based on work by Silvano Cerza",
   "license": "AGPL-3.0-only",
   "devDependencies": {
-    "@types/node": "^22.10.5",
-    "esbuild": "^0.24.2",
-    "obsidian": "^1.7.2",
-    "tsx": "^4.19.3",
-    "typescript": "^5.7.2"
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.8.1",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.13.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
   }
 }

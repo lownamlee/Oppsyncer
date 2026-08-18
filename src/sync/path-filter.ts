@@ -45,8 +45,8 @@ export function normalizeSafePath(input: string): string {
 export function isIncludedPath(
   path: string,
   userPatterns: string[],
-  syncObsidianConfig = false,
-  configDir = ".obsidian",
+  syncObsidianConfig: boolean,
+  configDir: string,
 ): boolean {
   let safePath: string;
   let safeConfigDir: string;
