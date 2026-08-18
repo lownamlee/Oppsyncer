@@ -9,6 +9,9 @@ import {
 test("fixed secret and application-state paths are excluded", () => {
   assert.equal(isIncludedPath(".obsidian/plugins/obsyncer/data.json", []), false);
   assert.equal(isIncludedPath(".git/config", []), false);
+  assert.equal(isIncludedPath(".gitignore", []), false);
+  assert.equal(isIncludedPath(".gitattributes", []), false);
+  assert.equal(isIncludedPath(".gitmodules", []), false);
   assert.equal(isIncludedPath(".trash/old.md", []), false);
   assert.equal(isIncludedPath("notes/hello.md", []), true);
 });

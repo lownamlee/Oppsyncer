@@ -33,8 +33,8 @@ recovery branch.
 - No local overwrite until a recovery ref is created and read back successfully.
 - One synchronization operation at a time; triggers are coalesced.
 - Local changes are detected by content scan, not only by editor events.
-- `.obsidian/**`, `.git/**`, `.trash/**`, access-token data, workspaces, and
-  plugin databases are never synchronized.
+- `.obsidian/**`, `.git/**`, Git control files, `.trash/**`, access-token data,
+  workspaces, and plugin databases are never synchronized.
 - Remote files are path-validated and downloaded blobs are SHA-verified before
   use.
 - An unknown two-populated-side bootstrap stops instead of guessing.

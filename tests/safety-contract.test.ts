@@ -28,6 +28,7 @@ test("recovery is verified before a dirty local snapshot is materialized", () =>
 test("local plugin state and Git metadata are fixed exclusions", () => {
   assert.match(settingsSource, /"\.obsidian\/\*\*"/);
   assert.match(settingsSource, /"\.git\/\*\*"/);
+  assert.match(settingsSource, /"\.gitignore"/);
 });
 
 test("public repositories are rejected before synchronization", () => {

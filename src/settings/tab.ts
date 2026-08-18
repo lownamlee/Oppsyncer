@@ -131,7 +131,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Additional exclusions")
       .setDesc(
-        "One glob per line. .obsidian/**, .git/**, .trash/** and OS metadata are always excluded.",
+        "One glob per line. Obsidian state, Git control files, trash, and OS metadata are always excluded.",
       )
       .addTextArea((area) => {
         area.inputEl.rows = 6;

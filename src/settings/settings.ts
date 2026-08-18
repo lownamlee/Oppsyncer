@@ -14,6 +14,9 @@ export interface ObSyncerSettings {
 export const DEFAULT_EXCLUDED_PATTERNS = [
   ".obsidian/**",
   ".git/**",
+  ".gitignore",
+  ".gitattributes",
+  ".gitmodules",
   ".trash/**",
   ".DS_Store",
   "Thumbs.db",
