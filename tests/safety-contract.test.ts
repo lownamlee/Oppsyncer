@@ -25,8 +25,10 @@ test("recovery is verified before a dirty local snapshot is materialized", () =>
   assert.ok(materialize > verify, "remote materialization precedes recovery verification");
 });
 
-test("local plugin state and Git metadata are fixed exclusions", () => {
-  assert.match(settingsSource, /"\.obsidian\/\*\*"/);
+test("local plugin credentials, volatile config, and Git metadata are fixed exclusions", () => {
+  assert.match(engineSource, /settings\.syncObsidianConfig/);
+  assert.match(readFileSync("src/sync/path-filter.ts", "utf8"), /plugins\/obsyncer\/data\.json\*/);
+  assert.match(readFileSync("src/sync/path-filter.ts", "utf8"), /workspace\*\.json/);
   assert.match(settingsSource, /"\.git\/\*\*"/);
   assert.match(settingsSource, /"\.gitignore"/);
 });

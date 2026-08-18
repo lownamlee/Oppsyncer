@@ -5,6 +5,7 @@ export interface ObSyncerSettings {
   githubBranch: string;
   deviceName: string;
   autoSync: boolean;
+  syncObsidianConfig: boolean;
   editDebounceSeconds: number;
   remotePollSeconds: number;
   excludedPatterns: string[];
@@ -12,8 +13,8 @@ export interface ObSyncerSettings {
 }
 
 export const DEFAULT_EXCLUDED_PATTERNS = [
-  ".obsidian/**",
   ".git/**",
+  "**/.git/**",
   ".gitignore",
   ".gitattributes",
   ".gitmodules",
@@ -21,6 +22,9 @@ export const DEFAULT_EXCLUDED_PATTERNS = [
   ".DS_Store",
   "Thumbs.db",
   "desktop.ini",
+  "**/*.db-wal",
+  "**/*.db-shm",
+  "**/*.db-journal",
   "conflict-files-obsidian-git.md",
 ] as const;
 
@@ -31,6 +35,7 @@ export const DEFAULT_SETTINGS: ObSyncerSettings = {
   githubBranch: "main",
   deviceName: "",
   autoSync: true,
+  syncObsidianConfig: false,
   editDebounceSeconds: 3,
   remotePollSeconds: 15,
   excludedPatterns: [],

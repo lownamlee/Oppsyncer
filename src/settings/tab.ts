@@ -101,6 +101,20 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Sync Obsidian configuration")
+      .setDesc(
+        "Sync safe files under the vault's .obsidian folder. Device workspace state, ObSyncer credentials/state, caches, legacy sync metadata, and SQLite temporary files remain excluded.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.data.settings.syncObsidianConfig)
+          .onChange(async (value) => {
+            this.plugin.data.settings.syncObsidianConfig = value;
+            await this.plugin.savePluginData(true);
+          }),
+      );
+
+    new Setting(containerEl)
       .setName("Edit debounce")
       .setDesc("Seconds to wait after the last local edit before syncing.")
       .addSlider((slider) =>
@@ -131,7 +145,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Additional exclusions")
       .setDesc(
-        "One glob per line. Obsidian state, Git control files, trash, and OS metadata are always excluded.",
+        "One glob per line. Credentials, volatile Obsidian state, Git control files, trash, and OS metadata are always excluded.",
       )
       .addTextArea((area) => {
         area.inputEl.rows = 6;
@@ -179,7 +193,7 @@ export default class ObSyncerSettingsTab extends PluginSettingTab {
 
     containerEl.createEl("h3", { text: "Safety" });
     containerEl.createEl("p", {
-      text: "ObSyncer never force-updates main and never replaces dirty local content until a recovery branch is created and verified. It cannot sync while a mobile operating system has suspended Obsidian.",
+      text: "ObSyncer never force-updates main, never synchronizes its token/state file, and never replaces dirty local content until a recovery branch is created and verified. It cannot sync while a mobile operating system has suspended Obsidian.",
     });
   }
 }

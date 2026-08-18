@@ -33,8 +33,10 @@ recovery branch.
 - No local overwrite until a recovery ref is created and read back successfully.
 - One synchronization operation at a time; triggers are coalesced.
 - Local changes are detected by content scan, not only by editor events.
-- `.obsidian/**`, `.git/**`, Git control files, `.trash/**`, access-token data,
-  workspaces, and plugin databases are never synchronized.
+- `.obsidian` synchronization is opt-in. ObSyncer's credential/state file,
+  workspaces, caches, file-recovery state, Obsidian Sync configuration, legacy
+  sync metadata, SQLite sidecars, `.git/**`, Git control files, and `.trash/**`
+  are never synchronized.
 - Remote files are path-validated and downloaded blobs are SHA-verified before
   use.
 - An unknown two-populated-side bootstrap stops instead of guessing.
@@ -46,6 +48,27 @@ recovery branch.
 - Opening the vault or returning to the foreground requests reconciliation.
 - Mobile operating systems may suspend Obsidian; synchronization resumes when
   Obsidian becomes active again.
+
+## Obsidian configuration
+
+Enable **Sync Obsidian configuration** to synchronize safe files under the
+vault's configuration folder, normally `.obsidian`. This includes application
+settings, hotkeys, themes, snippets, community-plugin code and settings, and
+stable plugin data such as LearnKit's committed SQLite database files.
+
+Hidden configuration changes are discovered by the startup/foreground scan and
+the foreground poller. Some settings and newly downloaded plugins require an
+Obsidian restart before the app uses them.
+
+The following remain device-local regardless of user exclusions:
+
+- `.obsidian/plugins/obsyncer/data.json*` (GitHub token and sync baseline)
+- `.obsidian/workspace*.json`, caches, and file-recovery state
+- `.obsidian/sync.json` and legacy Git sync metadata/logs
+- live SQLite `-wal`, `-shm`, and `-journal` sidecars
+
+Other community plugins may store their own credentials in `data.json`. Add
+those paths under **Additional exclusions** before enabling configuration sync.
 
 ## Initial setup
 

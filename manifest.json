@@ -1,7 +1,7 @@
 {
   "id": "obsyncer",
   "name": "ObSyncer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.7.7",
   "description": "Deterministic desktop and mobile vault sync through GitHub with automatic recovery snapshots.",
   "author": "Low Nam Lee",

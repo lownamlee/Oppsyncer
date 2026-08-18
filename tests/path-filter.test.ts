@@ -6,13 +6,24 @@ import {
   isIncludedPath,
 } from "../src/sync/path-filter";
 
-test("fixed secret and application-state paths are excluded", () => {
-  assert.equal(isIncludedPath(".obsidian/plugins/obsyncer/data.json", []), false);
+test("Obsidian configuration is opt-in with fixed secret and volatile exclusions", () => {
+  assert.equal(isIncludedPath(".obsidian/appearance.json", []), false);
+  assert.equal(isIncludedPath(".obsidian/appearance.json", [], true), true);
+  assert.equal(isIncludedPath(".obsidian/plugins/learnkit/data.json", [], true), true);
+  assert.equal(isIncludedPath(".obsidian/plugins/learnkit/scheduling/flashcards.db", [], true), true);
+  assert.equal(isIncludedPath(".obsidian/plugins/obsyncer/data.json", [], true), false);
+  assert.equal(isIncludedPath(".obsidian/plugins/obsyncer/data.json.tmp", [], true), false);
+  assert.equal(isIncludedPath(".obsidian/workspace-mobile.json", [], true), false);
+  assert.equal(isIncludedPath(".obsidian/file-recovery.json", [], true), false);
+  assert.equal(isIncludedPath(".obsidian/sync.json", [], true), false);
+  assert.equal(isIncludedPath(".obsidian/cache/index", [], true), false);
+  assert.equal(isIncludedPath(".obsidian/plugins/learnkit/scheduling/flashcards.db-wal", [], true), false);
   assert.equal(isIncludedPath(".git/config", []), false);
   assert.equal(isIncludedPath(".gitignore", []), false);
   assert.equal(isIncludedPath(".gitattributes", []), false);
   assert.equal(isIncludedPath(".gitmodules", []), false);
   assert.equal(isIncludedPath(".trash/old.md", []), false);
+  assert.equal(isIncludedPath("Notes/.private/hidden.md", []), false);
   assert.equal(isIncludedPath("notes/hello.md", []), true);
 });
 

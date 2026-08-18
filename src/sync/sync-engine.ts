@@ -12,7 +12,8 @@ import {
 } from "../model";
 import { ObSyncerSettings, settingsAreConfigured } from "../settings/settings";
 import { gitBlobSha } from "../hash";
-import { mapLimit, shortSha, sleep } from "../utils";
+import { mapLimit } from "../map-limit";
+import { shortSha, sleep } from "../utils";
 import { scanLocalVault, shaMap, shaMapsEqual } from "./local-snapshot";
 import { assertSafeRemotePath, isIncludedPath } from "./path-filter";
 import { decideSyncAction } from "./state-machine";
@@ -49,7 +50,7 @@ export default class SyncEngine {
   }
 
   isIncluded(path: string): boolean {
-    return isIncludedPath(path, this.getSettings().excludedPatterns);
+    return this.isIncludedWithSettings(path, this.getSettings());
   }
 
   async testConnection(): Promise<string> {
@@ -76,7 +77,7 @@ export default class SyncEngine {
       throw new Error("Refusing to synchronize notes with a public repository.");
     }
     const state = this.getState();
-    const local = await scanLocalVault(this.vault, settings.excludedPatterns);
+    const local = await scanLocalVault(this.vault, settings);
     this.assertFileSizes(local);
     const localMap = shaMap(local);
     const remoteHead = await client.getBranchHead();
@@ -283,7 +284,7 @@ export default class SyncEngine {
     settings: ObSyncerSettings,
   ): Promise<GitTreeEntry[]> {
     const preserved = Object.values(remote.files)
-      .filter((file) => !isIncludedPath(file.path, settings.excludedPatterns))
+      .filter((file) => !this.isIncludedWithSettings(file.path, settings))
       .map((file) => ({
         path: file.path,
         mode: file.mode,
@@ -382,7 +383,7 @@ export default class SyncEngine {
     settings: ObSyncerSettings,
   ): Promise<void> {
     const remoteIncluded = Object.values(remote.files)
-      .filter((file) => isIncludedPath(file.path, settings.excludedPatterns))
+      .filter((file) => this.isIncludedWithSettings(file.path, settings))
       .sort((left, right) => left.path.localeCompare(right.path));
     const changed = remoteIncluded.filter(
       (file) => localBefore.files[file.path]?.sha !== file.sha,
@@ -407,7 +408,7 @@ export default class SyncEngine {
       .filter((path) => !remotePaths.has(path))
       .sort();
 
-    const currentLocal = await scanLocalVault(this.vault, settings.excludedPatterns);
+    const currentLocal = await scanLocalVault(this.vault, settings);
     if (!shaMapsEqual(shaMap(currentLocal), shaMap(localBefore))) {
       throw new Error(
         "Local files changed while the remote was downloading. Nothing was replaced; retrying will preserve the new edit if recovery is required.",
@@ -423,28 +424,16 @@ export default class SyncEngine {
           bytes.byteOffset + bytes.byteLength,
         ) as ArrayBuffer;
         const path = normalizePath(file.path);
-        const existing = this.vault.getAbstractFileByPath(path);
-        if (existing instanceof TFile) {
-          await this.vault.modifyBinary(existing, exact);
-        } else if (existing) {
-          throw new Error(`Cannot replace a folder with a file: ${file.path}`);
-        } else {
-          await this.vault.createBinary(path, exact);
-        }
+        await this.writeLocalFile(path, exact);
       }
       for (const path of deletions) {
-        const existing = this.vault.getAbstractFileByPath(normalizePath(path));
-        if (existing instanceof TFile) {
-          await this.vault.delete(existing, true);
-        } else if (existing) {
-          throw new Error(`Cannot delete a folder as though it were a file: ${path}`);
-        }
+        await this.deleteLocalFile(normalizePath(path));
       }
     } finally {
       this.setApplyingRemote(false);
     }
 
-    const verified = await scanLocalVault(this.vault, settings.excludedPatterns);
+    const verified = await scanLocalVault(this.vault, settings);
     const expected = this.includedRemoteMap(remote, settings);
     if (!shaMapsEqual(shaMap(verified), expected)) {
       throw new Error(
@@ -473,7 +462,7 @@ export default class SyncEngine {
   ): Record<string, string> {
     return Object.fromEntries(
       Object.values(remote.files)
-        .filter((file) => isIncludedPath(file.path, settings.excludedPatterns))
+        .filter((file) => this.isIncludedWithSettings(file.path, settings))
         .map((file) => [file.path, file.sha]),
     );
   }
@@ -489,13 +478,22 @@ export default class SyncEngine {
       }
       portablePaths.set(portableKey, path);
       if (
-        isIncludedPath(path, settings.excludedPatterns) &&
+        this.isIncludedWithSettings(path, settings) &&
         file.mode !== "100644" &&
         file.mode !== "100755"
       ) {
         throw new Error(`Unsupported remote file mode at ${path}: ${file.mode}`);
       }
     }
+  }
+
+  private isIncludedWithSettings(path: string, settings: ObSyncerSettings): boolean {
+    return isIncludedPath(
+      path,
+      settings.excludedPatterns,
+      settings.syncObsidianConfig,
+      this.vault.configDir,
+    );
   }
 
   private assertFileSizes(local: LocalSnapshot): void {
@@ -518,12 +516,65 @@ export default class SyncEngine {
     return bytes;
   }
 
+  private isConfigPath(path: string): boolean {
+    const configDir = normalizePath(this.vault.configDir);
+    const normalized = normalizePath(path);
+    return normalized === configDir || normalized.startsWith(`${configDir}/`);
+  }
+
+  private async writeLocalFile(path: string, data: ArrayBuffer): Promise<void> {
+    if (this.isConfigPath(path)) {
+      const existing = await this.vault.adapter.stat(path);
+      if (existing?.type === "folder") {
+        throw new Error(`Cannot replace a folder with a file: ${path}`);
+      }
+      await this.vault.adapter.writeBinary(path, data);
+      return;
+    }
+
+    const existing = this.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      await this.vault.modifyBinary(existing, data);
+    } else if (existing) {
+      throw new Error(`Cannot replace a folder with a file: ${path}`);
+    } else {
+      await this.vault.createBinary(path, data);
+    }
+  }
+
+  private async deleteLocalFile(path: string): Promise<void> {
+    if (this.isConfigPath(path)) {
+      const existing = await this.vault.adapter.stat(path);
+      if (!existing) return;
+      if (existing.type !== "file") {
+        throw new Error(`Cannot delete a folder as though it were a file: ${path}`);
+      }
+      await this.vault.adapter.remove(path);
+      return;
+    }
+
+    const existing = this.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      await this.vault.delete(existing, true);
+    } else if (existing) {
+      throw new Error(`Cannot delete a folder as though it were a file: ${path}`);
+    }
+  }
+
   private async ensureParentFolder(path: string): Promise<void> {
     const segments = path.split("/").slice(0, -1);
     let current = "";
     for (const segment of segments) {
       current = current ? `${current}/${segment}` : segment;
       const normalized = normalizePath(current);
+      if (this.isConfigPath(normalized)) {
+        const stat = await this.vault.adapter.stat(normalized);
+        if (stat?.type === "file") {
+          throw new Error(`Cannot create a folder over an existing file: ${current}`);
+        }
+        if (!stat) await this.vault.adapter.mkdir(normalized);
+        continue;
+      }
       const existing = this.vault.getAbstractFileByPath(normalized);
       if (existing instanceof TFile) {
         throw new Error(`Cannot create a folder over an existing file: ${current}`);

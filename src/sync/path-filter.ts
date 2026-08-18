@@ -1,5 +1,17 @@
 import { DEFAULT_EXCLUDED_PATTERNS } from "../settings/settings";
 
+function configExclusions(configDir: string): string[] {
+  return [
+    `${configDir}/plugins/obsyncer/data.json*`,
+    `${configDir}/workspace*.json`,
+    `${configDir}/cache/**`,
+    `${configDir}/file-recovery.json`,
+    `${configDir}/sync.json`,
+    `${configDir}/github-sync-metadata.json`,
+    `${configDir}/github-sync.log`,
+  ];
+}
+
 export function normalizeSafePath(input: string): string {
   if (input.includes("\\") || input.startsWith("./")) {
     throw new Error(`Unsafe vault path: ${input}`);
@@ -30,15 +42,34 @@ export function normalizeSafePath(input: string): string {
   return normalized;
 }
 
-export function isIncludedPath(path: string, userPatterns: string[]): boolean {
+export function isIncludedPath(
+  path: string,
+  userPatterns: string[],
+  syncObsidianConfig = false,
+  configDir = ".obsidian",
+): boolean {
   let safePath: string;
+  let safeConfigDir: string;
   try {
     safePath = normalizeSafePath(path);
+    safeConfigDir = normalizeSafePath(configDir);
   } catch {
     return false;
   }
 
-  const patterns = [...DEFAULT_EXCLUDED_PATTERNS, ...userPatterns];
+  const inConfigDir =
+    safePath === safeConfigDir || safePath.startsWith(`${safeConfigDir}/`);
+  if (inConfigDir && !syncObsidianConfig) return false;
+
+  if (!inConfigDir && safePath.split("/").some((segment) => segment.startsWith("."))) {
+    return false;
+  }
+
+  const patterns = [
+    ...DEFAULT_EXCLUDED_PATTERNS,
+    ...configExclusions(safeConfigDir),
+    ...userPatterns,
+  ];
   return !patterns.some((pattern) => globMatches(safePath, pattern));
 }
 

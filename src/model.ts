@@ -101,6 +101,7 @@ export function normalizeData(
     ...(raw?.settings ?? {}),
   };
   settings.deviceName = settings.deviceName.trim() || defaultDeviceName;
+  settings.syncObsidianConfig = settings.syncObsidianConfig === true;
   settings.editDebounceSeconds = clamp(
     Number(settings.editDebounceSeconds) || DEFAULT_SETTINGS.editDebounceSeconds,
     1,

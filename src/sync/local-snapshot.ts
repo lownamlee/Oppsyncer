@@ -1,24 +1,36 @@
-import { Vault } from "obsidian";
+import type { Vault } from "obsidian";
 import { LocalSnapshot } from "../model";
+import { ObSyncerSettings } from "../settings/settings";
 import { gitBlobSha } from "../hash";
-import { mapLimit } from "../utils";
+import { mapLimit } from "../map-limit";
 import { isIncludedPath } from "./path-filter";
 
 const HASH_CONCURRENCY = 4;
 
 export async function scanLocalVault(
   vault: Vault,
-  excludedPatterns: string[],
+  settings: ObSyncerSettings,
 ): Promise<LocalSnapshot> {
-  const files = vault
+  const paths = vault
     .getFiles()
-    .filter((file) => isIncludedPath(file.path, excludedPatterns))
-    .sort((left, right) => left.path.localeCompare(right.path));
+    .map((file) => file.path)
+    .filter((path) => isIncludedPath(
+      path,
+      settings.excludedPatterns,
+      settings.syncObsidianConfig,
+      vault.configDir,
+    ));
 
-  const entries = await mapLimit(files, HASH_CONCURRENCY, async (file) => {
-    const bytes = new Uint8Array(await vault.readBinary(file));
+  if (settings.syncObsidianConfig) {
+    paths.push(...await listConfigFiles(vault, settings));
+  }
+
+  const files = [...new Set(paths)].sort((left, right) => left.localeCompare(right));
+
+  const entries = await mapLimit(files, HASH_CONCURRENCY, async (path) => {
+    const bytes = new Uint8Array(await vault.adapter.readBinary(path));
     return {
-      path: file.path,
+      path,
       sha: await gitBlobSha(bytes),
       size: bytes.byteLength,
     };
@@ -27,6 +39,37 @@ export async function scanLocalVault(
   return {
     files: Object.fromEntries(entries.map((entry) => [entry.path, entry])),
   };
+}
+
+async function listConfigFiles(
+  vault: Vault,
+  settings: ObSyncerSettings,
+): Promise<string[]> {
+  const root = vault.configDir;
+  if (!await vault.adapter.exists(root)) return [];
+
+  const files: string[] = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (!directory) continue;
+    const listed = await vault.adapter.list(directory);
+    for (const path of listed.files) {
+      const normalized = path;
+      if (isIncludedPath(
+        normalized,
+        settings.excludedPatterns,
+        settings.syncObsidianConfig,
+        root,
+      )) {
+        files.push(normalized);
+      }
+    }
+    for (const folder of listed.folders) {
+      pending.push(folder);
+    }
+  }
+  return files;
 }
 
 export function shaMap(snapshot: LocalSnapshot): Record<string, string> {
