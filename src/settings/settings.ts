@@ -1,35 +1,44 @@
-export interface GitHubSyncSettings {
-  firstSync: boolean;
+export interface ObSyncerSettings {
   githubToken: string;
   githubOwner: string;
   githubRepo: string;
   githubBranch: string;
-  syncStrategy: "manual" | "interval";
-  syncInterval: number;
-  syncOnStartup: boolean;
-  syncConfigDir: boolean;
-  conflictHandling: "overwriteLocal" | "ask" | "overwriteRemote";
-  conflictViewMode: "default" | "unified" | "split";
-  showStatusBarItem: boolean;
-  showSyncRibbonButton: boolean;
-  showConflictsRibbonButton: boolean;
-  enableLogging: boolean;
+  deviceName: string;
+  autoSync: boolean;
+  editDebounceSeconds: number;
+  remotePollSeconds: number;
+  excludedPatterns: string[];
+  showStatusBar: boolean;
 }
 
-export const DEFAULT_SETTINGS: GitHubSyncSettings = {
-  firstSync: true,
+export const DEFAULT_EXCLUDED_PATTERNS = [
+  ".obsidian/**",
+  ".git/**",
+  ".trash/**",
+  ".DS_Store",
+  "Thumbs.db",
+  "desktop.ini",
+  "conflict-files-obsidian-git.md",
+] as const;
+
+export const DEFAULT_SETTINGS: ObSyncerSettings = {
   githubToken: "",
   githubOwner: "",
   githubRepo: "",
   githubBranch: "main",
-  syncStrategy: "manual",
-  syncInterval: 1,
-  syncOnStartup: false,
-  syncConfigDir: false,
-  conflictHandling: "ask",
-  conflictViewMode: "default",
-  showStatusBarItem: true,
-  showSyncRibbonButton: true,
-  showConflictsRibbonButton: true,
-  enableLogging: false,
+  deviceName: "",
+  autoSync: true,
+  editDebounceSeconds: 3,
+  remotePollSeconds: 15,
+  excludedPatterns: [],
+  showStatusBar: true,
 };
+
+export function settingsAreConfigured(settings: ObSyncerSettings): boolean {
+  return Boolean(
+    settings.githubToken.trim() &&
+      settings.githubOwner.trim() &&
+      settings.githubRepo.trim() &&
+      settings.githubBranch.trim(),
+  );
+}

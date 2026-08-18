@@ -1,141 +1,88 @@
-# GitHub Gitless Sync
+# ObSyncer
 
-Plugin to sync a GitHub repository with an Obsidian vault.
+ObSyncer is a small Obsidian plugin that synchronizes a vault through a private
+GitHub repository on desktop and mobile without requiring a local Git binary.
 
-I highly recommend not using this plugin with another sync service.
-This might create problems for this plugin when determining what needs to be synced between remote repository and local vault.
+It is designed for one person who edits one device at a time but wants protection
+from delayed polling, offline edits, or an accidentally stale second device.
 
-## Features
+> **Alpha software:** version 0.1.0 is under active development. Test with a
+> disposable vault and repository before trusting it with primary notes.
 
-These are the main features of the plugin:
+## The synchronization rule
 
-- Desktop and mobile support
-- Doesn't require `git`
-- Multiple vaults sync
-- Automatic sync on fixed interval
-- Manual sync
-- Conflict resolution view
+The first device that successfully advances the remote `main` branch wins.
+ObSyncer never force-pushes `main` and does not create merge commits.
 
-- Filtering by file type (TODO 🔨)
+If two devices start from commit `A`, mobile pushes `B`, and desktop has an
+unpublished edit `C`, desktop performs this sequence:
 
-## Installation
+1. Create a commit containing `C`.
+2. Create and verify a branch such as
+   `obsyncer-recovery/desktop/2026-08-18T13-30-00Z-deadbeef`.
+3. Download `B` and make the local vault match it.
+4. Notify the user where `C` can be recovered.
 
-The plugin is available as a community plugin, you can easily search for it in Obsidian and install it from there.
+If both devices race to push, GitHub accepts only the first normal fast-forward
+update. The rejected candidate automatically becomes the losing device's
+recovery branch.
 
-![Obsidian community plugin settings](./assets/install_instructions.png)
+## Safety properties
 
-### Issues
+- No force update of the coordinated branch.
+- No local overwrite until a recovery ref is created and read back successfully.
+- One synchronization operation at a time; triggers are coalesced.
+- Local changes are detected by content scan, not only by editor events.
+- `.obsidian/**`, `.git/**`, `.trash/**`, access-token data, workspaces, and
+  plugin databases are never synchronized.
+- Remote files are path-validated and downloaded blobs are SHA-verified before
+  use.
+- An unknown two-populated-side bootstrap stops instead of guessing.
 
-If you find any problem please open an issue with as many details as possible.
+## Automatic behavior
 
-Please also provide logs if possible, you can copy them from the settings page. Remember to enable logging first.
+- Local edits synchronize after three seconds of inactivity by default.
+- Remote changes are polled every 15 seconds while Obsidian is visible.
+- Opening the vault or returning to the foreground requests reconciliation.
+- Mobile operating systems may suspend Obsidian; synchronization resumes when
+  Obsidian becomes active again.
 
-![Enable logging](./assets/logs_settings.png)
+## Initial setup
 
-## Usage
+Use a fine-grained GitHub token limited to one private repository with
+**Contents: Read and write**.
 
-### First sync
+The first setup must have one empty side:
 
-> [!IMPORTANT]
-> The first sync will only work if either the remote repository or the local vault are completely **EMPTY**. If both contain files the first sync will fail.
+- Existing vault + empty GitHub repository: ObSyncer initializes the remote.
+- Empty vault + populated GitHub repository: ObSyncer downloads the remote.
+- Existing vault + populated repository without an ObSyncer baseline: ObSyncer
+  stops and changes nothing.
 
-You must also configure the plugin settings before syncing.
+Do not run ObSyncer together with Obsidian Git, GitHub Gitless Sync, Obsidian
+Sync, Syncthing, or another tool that writes the same vault.
 
-These settings are mandatory:
+## Development
 
-- Your GitHub Token (see below)
-- Repository owner
-- Repository name
-- Repository branch
+```shell
+pnpm install
+pnpm test
+pnpm build
+```
 
-If any of this is not set sync won't start.
+Maintainers can run `pnpm test:github-live` while authenticated with GitHub CLI.
+It creates a uniquely named private repository, verifies the sibling-commit race
+and recovery-ref behavior against GitHub, and deletes the repository afterward.
 
-### Token
+The production build produces `main.js`. For manual installation, copy
+`main.js`, `manifest.json`, and `styles.css` into:
 
-A GitHub Fine-grained token is required to sync with your repository. You can create one by clicking [here](https://github.com/settings/personal-access-tokens/new).
-The token must have the `Contents` permission set to `Read and write` like in the screenshot below.
+```text
+<vault>/.obsidian/plugins/obsyncer/
+```
 
-![GitHub Fine-grained token](./assets/token_permissions.png)
+## License and attribution
 
-I also suggest creating the token with access only to your sync repo.
-
-### Sync modes
-
-You can always sync manually by clicking the sync button in the side ribbon.
-This will always work even if sync on interval is enabled.
-
-![Sync button](./assets/sync_button.png)
-
-If you don't want to see the button you can hide it, just check the plugin settings.
-
-The `Sync with GitHub` command is also available.
-
-### Conflict resolution
-
-When you sync multiple vaults using this plugin you might risk creating conflicts between the remote and a local vault.
-This usually happens when the remote has a new update from vault A, but vault B edits the file before syncing with remote.
-That creates a conflict, by default we'll open a view to let you resolve the conflict since you should have all the necessary
-information to correctly resolve it.
-
-By default the split view will be used on desktop and the unified one on mobile, you can change the settings to always use the one you prefer.
-
-![Split conflict resolution](./assets/split_diff_view.png)
-![Unified conflict resolution](./assets/unified_diff_view.png)
-
-If you don't want to resolve them you can change the settings to always prefer either the remote or local version in case of conflicts.
-
-### Config sync
-
-If you want to sync your vault configs with other vault you can enable that.
-It will sync the whole folder, that is `.obsidian` by default, including all plugins and themes.
-
-Note that the `.obsidian` folder will always be present, this happens because the plugin
-needs to store some metadata to correctly sync
-
-> [!CAUTION]
-> DO NOT sync configs if your remote repository is public.
-> That will expose the token you used to sync.
-
-### Reset
-
-If you need to reset the plugin settings and metadata you can easily do that in the settings.
-
-That will completely wipe all the sync metadata so you'll have to repeat the first sync as if you just enabled the plugin for the first time.
-
-## FAQs
-
-### What's different from other sync plugins?
-
-There are obviously other plugins that let you sync your vault with GitHub or other git hosts, like [`obsidian-git`](https://github.com/Vinzent03/obsidian-git) and [`Obsidian-GitHub-Sync`](https://github.com/kevinmkchin/Obsidian-GitHub-Sync) just to name a couple.
-
-Most of those plugins though require the `git` executable to be present in your system, they might rely on Bash scripts too. This makes them much less portable, it's harder to use on Windows, and mobile is really unstable because most of the times they rely on [`isomorphic-git`](https://isomorphic-git.org/).
-
-This annoyed me because I wanted to have the same experience on every platform, and I wanted especially to support mobile.
-
-So I went a different way and chose to sync **only** with GitHub using their REST APIs, this means I don't rely in anyway on `git` being present in your system. This way I can easily support desktop and mobile with the same identical logic, and some small necessary differences in the UI for a better user experience.
-
-This obviously comes with some limitations. Since `git` is not used you can't interact with your repository locally in any way, and any `git` feature like branching, merging, or rebasing, are not available at all.
-
-Also since this relies only on the GitHub APIs you can only sync with GitHub and no other host.
-
-### Can I use this with other sync plugins?
-
-No.
-
-To work correctly this plugin uses a custom metadata file that is updated every time we sync, if you commit changes outside the plugin that file is not updated properly.
-
-Other plugins don't know about that file, so if you sync with others too you risk losing data.
-
-## Contributing
-
-Contributions are obviously accepted.
-
-Bug fixes are always welcome, new feature must be discussed first. Open a [discussion](https://github.com/silvanocerza/github-gitless-sync/discussions) and let's talk in that case.
-
-Keep PRs as small as possible, I won't review PRs with hundreds of lines if it's mostly code.
-
-Low quality or vibe coded PRs are not welcome. Put some effort in it please.
-
-## License
-
-The project is licensed under the [AGPLv3](https://www.gnu.org/licenses/agpl-3.0.en.html) license.
+ObSyncer is a fork of
+[GitHub Gitless Sync](https://github.com/silvanocerza/github-gitless-sync) by
+Silvano Cerza. It remains licensed under AGPL-3.0-only; see [LICENSE](LICENSE).

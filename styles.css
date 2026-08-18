@@ -1,9 +1,1 @@
-.hidden-navigation-header {
-    display: none;
-}
-
-.padless-conflicts-view-container {
-    padding: 0;
-    height: 100%;
-    width: 100%;
-}
+/* ObSyncer intentionally uses Obsidian's native components and needs no custom UI styles. */

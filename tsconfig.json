@@ -5,14 +5,13 @@
     "inlineSources": true,
     "module": "ESNext",
     "target": "ES6",
-    "allowJs": true,
-    "jsx": "react-jsx",
+    "allowJs": false,
     "noImplicitAny": true,
     "moduleResolution": "node",
-    "importHelpers": true,
+    "importHelpers": false,
     "isolatedModules": true,
     "strictNullChecks": true,
     "lib": ["DOM", "ES5", "ES6", "ES7"]
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": ["src/**/*.ts"]
 }

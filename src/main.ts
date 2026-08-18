@@ -1,306 +1,320 @@
 import {
-  EventRef,
-  Plugin,
-  WorkspaceLeaf,
-  normalizePath,
   Notice,
+  Platform,
+  Plugin,
+  TAbstractFile,
 } from "obsidian";
-import { GitHubSyncSettings, DEFAULT_SETTINGS } from "./settings/settings";
-import GitHubSyncSettingsTab from "./settings/tab";
-import SyncManager, { ConflictFile, ConflictResolution } from "./sync-manager";
-import Logger from "./logger";
 import {
-  ConflictsResolutionView,
-  CONFLICTS_RESOLUTION_VIEW_TYPE,
-} from "./views/conflicts-resolution/view";
+  normalizeData,
+  ObSyncerData,
+  ObSyncerState,
+  SyncOutcome,
+  SyncTrigger,
+  SyncUiStatus,
+} from "./model";
+import ObSyncerSettingsTab from "./settings/tab";
+import { settingsAreConfigured } from "./settings/settings";
+import SyncEngine from "./sync/sync-engine";
 
-export default class GitHubSyncPlugin extends Plugin {
-  settings: GitHubSyncSettings;
-  syncManager: SyncManager;
-  logger: Logger;
+export default class ObSyncerPlugin extends Plugin {
+  data: ObSyncerData;
+  private engine: SyncEngine;
+  private statusBar: HTMLElement | null = null;
+  private status: SyncUiStatus = "unconfigured";
+  private statusDetail = "";
+  private editTimer: number | null = null;
+  private pollTimer: number | null = null;
+  private currentSync: Promise<void> | null = null;
+  private rerunRequested = false;
+  private rerunTrigger: SyncTrigger = "poll";
+  private applyingRemote = false;
+  private persistQueue: Promise<void> = Promise.resolve();
+  private lastReportedError = "";
 
-  statusBarItem: HTMLElement | null = null;
-  syncRibbonIcon: HTMLElement | null = null;
-  conflictsRibbonIcon: HTMLElement | null = null;
+  async onload(): Promise<void> {
+    const raw = (await this.loadData()) as Partial<ObSyncerData> | null;
+    this.data = normalizeData(raw, Platform.isMobile ? "mobile" : "desktop");
+    await this.persistData();
 
-  activeLeafChangeListener: EventRef | null = null;
-  vaultCreateListener: EventRef | null = null;
-  vaultModifyListener: EventRef | null = null;
-
-  // Called in ConflictResolutionView when the user solves all the conflicts.
-  // This is initialized every time we open the view to set new conflicts so
-  // we can notify the SyncManager that everything has been resolved and the sync
-  // process can continue on.
-  conflictsResolver: ((resolutions: ConflictResolution[]) => void) | null =
-    null;
-
-  // We keep track of the sync conflicts in here too in case the
-  // conflicts view must be rebuilt, or the user closes the view
-  // and it gets destroyed.
-  // By keeping them here we can recreate it easily.
-  private conflicts: ConflictFile[] = [];
-
-  async onUserEnable() {
-    if (
-      this.settings.githubToken === "" ||
-      this.settings.githubOwner === "" ||
-      this.settings.githubRepo === "" ||
-      this.settings.githubBranch === ""
-    ) {
-      new Notice("Go to settings to configure syncing");
-    }
-  }
-
-  getConflictsView(): ConflictsResolutionView | null {
-    const leaves = this.app.workspace.getLeavesOfType(
-      CONFLICTS_RESOLUTION_VIEW_TYPE,
-    );
-    if (leaves.length === 0) {
-      return null;
-    }
-    return leaves[0].view as ConflictsResolutionView;
-  }
-
-  async activateView() {
-    const { workspace } = this.app;
-    let leaf: WorkspaceLeaf | null = null;
-    const leaves = workspace.getLeavesOfType(CONFLICTS_RESOLUTION_VIEW_TYPE);
-    if (leaves.length > 0) {
-      leaf = leaves[0];
-    } else {
-      leaf = workspace.getLeaf(false)!;
-      await leaf.setViewState({
-        type: CONFLICTS_RESOLUTION_VIEW_TYPE,
-        active: true,
-      });
-    }
-    workspace.revealLeaf(leaf);
-  }
-
-  async onload() {
-    await this.loadSettings();
-
-    this.logger = new Logger(this.app.vault, this.settings.enableLogging);
-    this.logger.init();
-
-    this.registerView(
-      CONFLICTS_RESOLUTION_VIEW_TYPE,
-      (leaf) => new ConflictsResolutionView(leaf, this, this.conflicts),
-    );
-
-    this.addSettingTab(new GitHubSyncSettingsTab(this.app, this));
-
-    this.syncManager = new SyncManager(
-      this.app.vault,
-      this.settings,
-      this.onConflicts.bind(this),
-      this.logger,
-    );
-    await this.syncManager.loadMetadata();
-
-    if (this.settings.syncStrategy == "interval") {
-      this.restartSyncInterval();
-    }
-
-    this.app.workspace.onLayoutReady(async () => {
-      // Create the events handling only after tha layout is ready to avoid
-      // getting spammed with create events.
-      // See the official Obsidian docs:
-      // https://docs.obsidian.md/Reference/TypeScript+API/Vault/on('create')
-      this.syncManager.startEventsListener(this);
-
-      // Load the ribbons after layout is ready so they're shown after the core
-      // buttons
-      if (this.settings.showStatusBarItem) {
-        this.showStatusBarItem();
-      }
-
-      if (this.settings.showConflictsRibbonButton) {
-        this.showConflictsRibbonIcon();
-      }
-
-      if (this.settings.showSyncRibbonButton) {
-        this.showSyncRibbonIcon();
-      }
+    this.engine = new SyncEngine({
+      vault: this.app.vault,
+      getSettings: () => this.data.settings,
+      getState: () => this.data.state,
+      saveState: async (state) => {
+        this.data.state = state;
+        await this.persistData();
+      },
+      setApplyingRemote: (applying) => {
+        this.applyingRemote = applying;
+      },
     });
 
+    this.addSettingTab(new ObSyncerSettingsTab(this.app, this));
     this.addCommand({
-      id: "sync-files",
-      name: "Sync with GitHub",
-      repeatable: false,
+      id: "sync-now",
+      name: "Sync now",
       icon: "refresh-cw",
-      callback: this.sync.bind(this),
+      callback: () => void this.requestSync("manual"),
+    });
+    this.addCommand({
+      id: "open-last-recovery",
+      name: "Open last recovery branch",
+      icon: "history",
+      checkCallback: (checking) => {
+        if (!this.data.state.lastRecoveryRef) return false;
+        if (!checking) this.openLastRecoveryBranch();
+        return true;
+      },
     });
 
-    this.addCommand({
-      id: "merge",
-      name: "Open sync conflicts view",
-      repeatable: false,
-      icon: "refresh-cw",
-      callback: this.openConflictsView.bind(this),
+    this.app.workspace.onLayoutReady(() => {
+      this.registerVaultEvents();
+      this.configureStatusBar();
+      this.restartPoller();
+      this.updateConfiguredStatus();
+      if (this.data.settings.autoSync && settingsAreConfigured(this.data.settings)) {
+        void this.requestSync("startup");
+      }
+    });
+
+    this.registerDomEvent(document, "visibilitychange", () => {
+      if (!this.data.settings.autoSync || !settingsAreConfigured(this.data.settings)) {
+        return;
+      }
+      if (document.visibilityState === "visible") {
+        void this.requestSync("foreground");
+      } else if (this.editTimer !== null) {
+        window.clearTimeout(this.editTimer);
+        this.editTimer = null;
+        void this.requestSync("background");
+      }
     });
   }
 
-  async sync() {
-    if (
-      this.settings.githubToken === "" ||
-      this.settings.githubOwner === "" ||
-      this.settings.githubRepo === "" ||
-      this.settings.githubBranch === ""
-    ) {
-      new Notice("Sync plugin not configured");
+  onunload(): void {
+    if (this.editTimer !== null) window.clearTimeout(this.editTimer);
+    if (this.pollTimer !== null) window.clearInterval(this.pollTimer);
+  }
+
+  async savePluginData(restartPoller = false): Promise<void> {
+    await this.persistData();
+    if (restartPoller) this.restartPoller();
+    this.configureStatusBar();
+    this.updateConfiguredStatus();
+  }
+
+  async testConnection(): Promise<void> {
+    try {
+      const repository = await this.engine.testConnection();
+      new Notice(`ObSyncer connected to ${repository}.`);
+    } catch (error) {
+      new Notice(`ObSyncer connection failed: ${messageOf(error)}`, 0);
+    }
+  }
+
+  async syncNow(): Promise<void> {
+    await this.requestSync("manual");
+  }
+
+  getRecoveryUrl(): string | null {
+    const recovery = this.data.state.lastRecoveryRef;
+    if (!recovery || !settingsAreConfigured(this.data.settings)) return null;
+    const { githubOwner, githubRepo } = this.data.settings;
+    return `https://github.com/${encodeURIComponent(githubOwner)}/${encodeURIComponent(
+      githubRepo,
+    )}/tree/${recovery.split("/").map(encodeURIComponent).join("/")}`;
+  }
+
+  openLastRecoveryBranch(): void {
+    const url = this.getRecoveryUrl();
+    if (!url) {
+      new Notice("ObSyncer has no recovery branch yet.");
       return;
     }
-    if (this.settings.firstSync) {
-      const notice = new Notice("Syncing...");
-      try {
-        await this.syncManager.firstSync();
-        this.settings.firstSync = false;
-        this.saveSettings();
-        // Shown only if sync doesn't fail
-        new Notice("Sync successful", 5000);
-      } catch (err) {
-        // Show the error to the user, it's not automatically dismissed to make sure
-        // the user sees it.
-        new Notice(`Error syncing. ${err}`);
+    window.open(url, "_blank");
+  }
+
+  private registerVaultEvents(): void {
+    const schedule = (file: TAbstractFile): void => {
+      if (this.applyingRemote) {
+        this.rerunRequested = true;
+        this.rerunTrigger = "edit";
+        return;
       }
-      notice.hide();
-    } else {
-      await this.syncManager.sync();
-    }
-    this.updateStatusBarItem();
+      if (!this.engine.isIncluded(file.path)) return;
+      this.scheduleEditSync();
+    };
+    this.registerEvent(this.app.vault.on("create", schedule));
+    this.registerEvent(this.app.vault.on("modify", schedule));
+    this.registerEvent(this.app.vault.on("delete", schedule));
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (
+          !this.applyingRemote &&
+          !this.engine.isIncluded(file.path) &&
+          !this.engine.isIncluded(oldPath)
+        ) {
+          return;
+        }
+        if (this.applyingRemote) {
+          this.rerunRequested = true;
+          this.rerunTrigger = "edit";
+          return;
+        }
+        this.scheduleEditSync();
+      }),
+    );
   }
 
-  async onunload() {
-    this.stopSyncInterval();
-  }
-
-  showStatusBarItem() {
-    if (this.statusBarItem) {
+  private scheduleEditSync(): void {
+    if (!this.data.settings.autoSync || !settingsAreConfigured(this.data.settings)) {
       return;
     }
-    this.statusBarItem = this.addStatusBarItem();
+    if (this.editTimer !== null) window.clearTimeout(this.editTimer);
+    this.setStatus("pending", "Waiting for editing to stop");
+    this.editTimer = window.setTimeout(() => {
+      this.editTimer = null;
+      void this.requestSync("edit");
+    }, this.data.settings.editDebounceSeconds * 1000);
+  }
 
-    if (!this.activeLeafChangeListener) {
-      this.activeLeafChangeListener = this.app.workspace.on(
-        "active-leaf-change",
-        () => this.updateStatusBarItem(),
+  private restartPoller(): void {
+    if (this.pollTimer !== null) {
+      window.clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    if (!this.data.settings.autoSync || !settingsAreConfigured(this.data.settings)) {
+      return;
+    }
+    this.pollTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void this.requestSync("poll");
+      }
+    }, this.data.settings.remotePollSeconds * 1000);
+    this.registerInterval(this.pollTimer);
+  }
+
+  private requestSync(trigger: SyncTrigger): Promise<void> {
+    if (this.currentSync) {
+      this.rerunRequested = true;
+      this.rerunTrigger = trigger;
+      return this.currentSync;
+    }
+    this.currentSync = this.runSyncLoop(trigger).finally(() => {
+      this.currentSync = null;
+    });
+    return this.currentSync;
+  }
+
+  private async runSyncLoop(initialTrigger: SyncTrigger): Promise<void> {
+    let trigger = initialTrigger;
+    do {
+      this.rerunRequested = false;
+      await this.performSync(trigger);
+      trigger = this.rerunTrigger;
+    } while (this.rerunRequested);
+  }
+
+  private async performSync(trigger: SyncTrigger): Promise<void> {
+    if (!settingsAreConfigured(this.data.settings)) {
+      this.setStatus("unconfigured", "Configure GitHub access in settings");
+      if (trigger === "manual") new Notice("Configure ObSyncer first.");
+      return;
+    }
+
+    this.setStatus("syncing", `Running ${trigger} synchronization`);
+    try {
+      const outcome = await this.engine.sync(trigger);
+      this.lastReportedError = "";
+      this.handleOutcome(outcome, trigger);
+    } catch (error) {
+      const message = messageOf(error);
+      this.setStatus("error", message);
+      if (trigger === "manual" || message !== this.lastReportedError) {
+        new Notice(`ObSyncer: ${message}`, trigger === "manual" ? 0 : 8000);
+      }
+      this.lastReportedError = message;
+    }
+  }
+
+  private handleOutcome(outcome: SyncOutcome, trigger: SyncTrigger): void {
+    if (outcome.kind === "recovered" && outcome.recoveryRef) {
+      this.setStatus("recovery", `Recovered local work to ${outcome.recoveryRef}`);
+      new Notice(
+        `ObSyncer kept the remote winner. Your local version is safe on ${outcome.recoveryRef}.`,
+        0,
       );
-    }
-    if (!this.vaultCreateListener) {
-      this.vaultCreateListener = this.app.vault.on("create", () => {
-        this.updateStatusBarItem();
-      });
-    }
-    if (!this.vaultModifyListener) {
-      this.vaultModifyListener = this.app.vault.on("modify", () => {
-        this.updateStatusBarItem();
-      });
-    }
-  }
-
-  hideStatusBarItem() {
-    this.statusBarItem?.remove();
-    this.statusBarItem = null;
-  }
-
-  updateStatusBarItem() {
-    if (!this.statusBarItem) {
-      return;
-    }
-    const activeFile = this.app.workspace.getActiveFile();
-    if (!activeFile) {
       return;
     }
 
-    let state = "Unknown";
-    const fileData = this.syncManager.getFileMetadata(activeFile.path);
-    if (!fileData) {
-      state = "Untracked";
-    } else if (fileData.dirty) {
-      state = "Outdated";
-    } else if (!fileData.dirty) {
-      state = "Up to date";
+    const detail: Record<SyncOutcome["kind"], string> = {
+      idle: "Up to date",
+      empty: outcome.detail ?? "Nothing to synchronize",
+      initialized: "Remote repository initialized",
+      pushed: "Local changes uploaded",
+      pulled: "Remote changes downloaded",
+      "baseline-recorded": "Baseline updated",
+      recovered: "Recovery completed",
+    };
+    this.setStatus("idle", detail[outcome.kind]);
+    if (trigger === "manual" || outcome.kind === "initialized") {
+      new Notice(`ObSyncer: ${detail[outcome.kind]}.`);
     }
-
-    this.statusBarItem.setText(`GitHub: ${state}`);
   }
 
-  showSyncRibbonIcon() {
-    if (this.syncRibbonIcon) {
+  private configureStatusBar(): void {
+    if (!this.data.settings.showStatusBar) {
+      this.statusBar?.remove();
+      this.statusBar = null;
       return;
     }
-    this.syncRibbonIcon = this.addRibbonIcon(
-      "refresh-cw",
-      "Sync with GitHub",
-      this.sync.bind(this),
-    );
-  }
-
-  hideSyncRibbonIcon() {
-    this.syncRibbonIcon?.remove();
-    this.syncRibbonIcon = null;
-  }
-
-  showConflictsRibbonIcon() {
-    if (this.conflictsRibbonIcon) {
-      return;
+    if (!this.statusBar) {
+      this.statusBar = this.addStatusBarItem();
+      this.statusBar.addEventListener("click", () => void this.requestSync("manual"));
     }
-    this.conflictsRibbonIcon = this.addRibbonIcon(
-      "merge",
-      "Open sync conflicts view",
-      this.openConflictsView.bind(this),
-    );
+    this.renderStatus();
   }
 
-  hideConflictsRibbonIcon() {
-    this.conflictsRibbonIcon?.remove();
-    this.conflictsRibbonIcon = null;
+  private updateConfiguredStatus(): void {
+    if (!settingsAreConfigured(this.data.settings)) {
+      this.setStatus("unconfigured", "Configure GitHub access in settings");
+    } else if (!this.data.settings.autoSync) {
+      this.setStatus("paused", "Automatic synchronization is paused");
+    } else if (this.status === "unconfigured" || this.status === "paused") {
+      this.setStatus("idle", "Ready");
+    }
   }
 
-  async openConflictsView() {
-    await this.activateView();
-    this.getConflictsView()?.setConflictFiles(this.conflicts);
+  private setStatus(status: SyncUiStatus, detail: string): void {
+    this.status = status;
+    this.statusDetail = detail;
+    this.renderStatus();
   }
 
-  async onConflicts(conflicts: ConflictFile[]): Promise<ConflictResolution[]> {
-    this.conflicts = conflicts;
-    return await new Promise(async (resolve) => {
-      this.conflictsResolver = resolve;
-      await this.activateView();
-      this.getConflictsView()?.setConflictFiles(conflicts);
-    });
+  private renderStatus(): void {
+    if (!this.statusBar) return;
+    const labels: Record<SyncUiStatus, string> = {
+      unconfigured: "ObSyncer: setup",
+      paused: "ObSyncer: paused",
+      idle: "ObSyncer: synced",
+      pending: "ObSyncer: pending",
+      syncing: "ObSyncer: syncing…",
+      recovery: "ObSyncer: recovered",
+      error: "ObSyncer: error",
+    };
+    this.statusBar.setText(labels[this.status]);
+    this.statusBar.setAttribute("aria-label", this.statusDetail);
+    this.statusBar.setAttribute("title", this.statusDetail);
   }
 
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  private persistData(): Promise<void> {
+    this.persistQueue = this.persistQueue
+      .catch(() => undefined)
+      .then(() => this.saveData(this.data));
+    return this.persistQueue;
   }
+}
 
-  async saveSettings() {
-    await this.saveData(this.settings);
-  }
-
-  // Proxy methods from sync manager to ease handling the interval
-  // when settings are changed
-  startSyncInterval() {
-    const intervalID = this.syncManager.startSyncInterval(
-      this.settings.syncInterval,
-    );
-    this.registerInterval(intervalID);
-  }
-
-  stopSyncInterval() {
-    this.syncManager.stopSyncInterval();
-  }
-
-  restartSyncInterval() {
-    this.syncManager.stopSyncInterval();
-    this.syncManager.startSyncInterval(this.settings.syncInterval);
-  }
-
-  async reset() {
-    this.settings = DEFAULT_SETTINGS;
-    this.saveSettings();
-    await this.syncManager.resetMetadata();
-  }
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

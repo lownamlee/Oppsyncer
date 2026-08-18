@@ -1,449 +1,244 @@
-import { requestUrl } from "obsidian";
-import Logger from "src/logger";
-import { GitHubSyncSettings } from "src/settings/settings";
-import { retryUntil } from "src/utils";
+import { requestUrl, RequestUrlResponse } from "obsidian";
+import { ObSyncerSettings } from "../settings/settings";
+import { RemoteFileState, RemoteSnapshot } from "../model";
+import { base64ToBytes, bytesToBase64, sleep } from "../utils";
 
-export type RepoContent = {
-  files: { [key: string]: GetTreeResponseItem };
-  sha: string;
-};
+const API_VERSION = "2022-11-28";
+const MAX_ATTEMPTS = 3;
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
 
-/**
- * Represents a single item in a tree response from the GitHub API.
- */
-export type GetTreeResponseItem = {
+export interface RepositoryInfo {
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+}
+
+export interface GitTreeEntry {
   path: string;
   mode: string;
-  type: string;
+  type: "blob";
   sha: string;
-  size: number;
-  url: string;
-};
+}
 
-export type NewTreeRequestItem = {
-  path: string;
-  mode: string;
-  type: string;
-  sha?: string | null;
-  content?: string;
-};
-
-/**
- * Response received when we create a new binary blob on GitHub
- */
-export type CreatedBlob = {
-  sha: string;
-};
-
-/**
- * Represents a git blob response from the GitHub API.
- */
-export type BlobFile = {
-  sha: string;
-  node_id: string;
-  size: number;
-  url: string;
-  content: string;
-  encoding: string;
-};
-
-/**
- * Custom error to make some stuff easier
- */
-class GithubAPIError extends Error {
+export class GitHubApiError extends Error {
   constructor(
-    public status: number,
+    public readonly status: number,
     message: string,
   ) {
     super(message);
+    this.name = "GitHubApiError";
   }
 }
 
-export default class GithubClient {
-  constructor(
-    private settings: GitHubSyncSettings,
-    private logger: Logger,
-  ) {}
+export default class GitHubClient {
+  constructor(private readonly settings: ObSyncerSettings) {}
 
-  headers() {
+  async getRepository(): Promise<RepositoryInfo> {
+    const response = await this.request("GET", "");
+    this.assertSuccess(response, "read repository");
+    const data = response.json as {
+      full_name: string;
+      private: boolean;
+      default_branch: string;
+    };
     return {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${this.settings.githubToken}`,
-      "X-GitHub-Api-Version": "2022-11-28",
+      fullName: data.full_name,
+      private: data.private,
+      defaultBranch: data.default_branch,
     };
   }
 
-  /**
-   * Gets the content of the repo.
-   *
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   * @returns Array of files in the directory in the remote repo
-   */
-  async getRepoContent({
-    retry = false,
-    maxRetries = 5,
-  } = {}): Promise<RepoContent> {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/git/trees/${this.settings.githubBranch}?recursive=1`,
-          headers: this.headers(),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422, // Retry condition: only retry on 422 status
-      retry ? maxRetries : 0, // Use 0 retries if retry is false
-    );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to get repo content", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to get repo content, status ${response.status}`,
-      );
-    }
-
-    const files = response.json.tree
-      .filter((file: GetTreeResponseItem) => file.type === "blob")
-      .reduce(
-        (
-          acc: { [key: string]: GetTreeResponseItem },
-          file: GetTreeResponseItem,
-        ) => ({ ...acc, [file.path]: file }),
-        {},
-      );
-    return { files, sha: response.json.sha };
+  async getBranchHead(): Promise<string | null> {
+    const ref = `heads/${this.settings.githubBranch}`;
+    const response = await this.request("GET", `/git/ref/${encodeRef(ref)}`);
+    if (response.status === 404 || response.status === 409) return null;
+    this.assertSuccess(response, `read branch ${this.settings.githubBranch}`);
+    return (response.json as { object: { sha: string } }).object.sha;
   }
 
-  /**
-   * Creates a new tree in the GitHub repository.
-   *
-   * @param tree The tree object to create
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   * @returns The SHA of the created tree
-   */
-  async createTree({
-    tree,
-    retry = false,
-    maxRetries = 5,
-  }: {
-    tree: { tree: NewTreeRequestItem[]; base_tree: string };
-    retry?: boolean;
-    maxRetries?: number;
-  }) {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/git/trees`,
-          headers: this.headers(),
-          method: "POST",
-          body: JSON.stringify(tree),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
+  async getRemoteSnapshot(commitSha: string): Promise<RemoteSnapshot> {
+    const commitResponse = await this.request(
+      "GET",
+      `/git/commits/${encodeURIComponent(commitSha)}`,
     );
+    this.assertSuccess(commitResponse, `read commit ${commitSha.slice(0, 8)}`);
+    const commit = commitResponse.json as { sha: string; tree: { sha: string } };
 
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to create tree", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to create tree, status ${response.status}`,
-      );
-    }
-    return response.json.sha;
-  }
-
-  /**
-   * Creates a new commit in the repository.
-   *
-   * @param message The commit message
-   * @param treeSha The SHA of the tree
-   * @param parent The SHA of the parent commit
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   * @returns The SHA of the created commit
-   */
-  async createCommit({
-    message,
-    treeSha,
-    parent,
-    retry = false,
-    maxRetries = 5,
-  }: {
-    message: string;
-    treeSha: string;
-    parent: string;
-    retry?: boolean;
-    maxRetries?: number;
-  }): Promise<string> {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/git/commits`,
-          headers: this.headers(),
-          method: "POST",
-          body: JSON.stringify({
-            message: message,
-            tree: treeSha,
-            parents: [parent],
-          }),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
+    const treeResponse = await this.request(
+      "GET",
+      `/git/trees/${encodeURIComponent(commit.tree.sha)}?recursive=1`,
     );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to create commit", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to create commit, status ${response.status}`,
-      );
+    this.assertSuccess(treeResponse, `read tree ${commit.tree.sha.slice(0, 8)}`);
+    const tree = treeResponse.json as {
+      sha: string;
+      truncated: boolean;
+      tree: Array<{
+        path: string;
+        mode: string;
+        type: string;
+        sha: string;
+        size?: number;
+      }>;
+    };
+    if (tree.truncated) {
+      throw new Error("The GitHub tree response was truncated; refusing an incomplete sync.");
     }
-    return response.json.sha;
-  }
 
-  /**
-   * Gets the SHA of the branch head.
-   *
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   * @returns The SHA of the branch head
-   */
-  async getBranchHeadSha({ retry = false, maxRetries = 5 } = {}) {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/git/refs/heads/${this.settings.githubBranch}`,
-          headers: this.headers(),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
-    );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to get branch head sha", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to get branch head sha, status ${response.status}`,
-      );
+    const files: Record<string, RemoteFileState> = {};
+    for (const entry of tree.tree) {
+      if (entry.type === "tree") continue;
+      if (entry.type !== "blob") {
+        throw new Error(`Unsupported Git object at ${entry.path}: ${entry.type}`);
+      }
+      files[entry.path] = {
+        path: entry.path,
+        mode: entry.mode,
+        type: "blob",
+        sha: entry.sha,
+        size: entry.size ?? 0,
+      };
     }
-    return response.json.object.sha;
-  }
 
-  /**
-   * Updates the branch head to point to a new commit.
-   *
-   * @param sha The SHA of the commit to point to
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   */
-  async updateBranchHead({
-    sha,
-    retry = false,
-    maxRetries = 5,
-  }: {
-    sha: string;
-    retry?: boolean;
-    maxRetries?: number;
-  }) {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/git/refs/heads/${this.settings.githubBranch}`,
-          headers: this.headers(),
-          method: "PATCH",
-          body: JSON.stringify({
-            sha: sha,
-          }),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
-    );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to update branch head sha", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to update branch head sha, status ${response.status}`,
-      );
-    }
-  }
-
-  /**
-   * Creates a new blob in the GitHub remote, this is mainly used to upload binary files.
-   *
-   * @param content The content of the blob to upload
-   * @param encoding Content encoding, can be "utf-8" or "base64". Defaults to "base64"
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   * @returns The SHA of the newly uploaded blob
-   */
-  async createBlob({
-    content,
-    encoding = "base64",
-    retry = false,
-    maxRetries = 5,
-  }: {
-    content: string;
-    encoding?: "utf-8" | "base64";
-    retry?: boolean;
-    maxRetries?: number;
-  }): Promise<CreatedBlob> {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/git/blobs`,
-          headers: this.headers(),
-          method: "POST",
-          body: JSON.stringify({ content, encoding }),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
-    );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to create blob", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to create blob, status ${response.status}`,
-      );
-    }
     return {
-      sha: response.json["sha"],
+      commitSha: commit.sha,
+      treeSha: tree.sha,
+      files,
     };
   }
 
-  /**
-   * Gets a blob from its sha
-   *
-   * @param sha The SHA of the blob
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   * @returns The blob file
-   */
-  async getBlob({
-    sha,
-    retry = false,
-    maxRetries = 5,
-  }: {
-    sha: string;
-    retry?: boolean;
-    maxRetries?: number;
-  }): Promise<BlobFile> {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/git/blobs/${sha}`,
-          headers: this.headers(),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
+  async getBlobBytes(sha: string): Promise<Uint8Array> {
+    const response = await this.request(
+      "GET",
+      `/git/blobs/${encodeURIComponent(sha)}`,
     );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to get blob", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to get blob, status ${response.status}`,
-      );
+    this.assertSuccess(response, `download blob ${sha.slice(0, 8)}`);
+    const blob = response.json as { content: string; encoding: string };
+    if (blob.encoding !== "base64") {
+      throw new Error(`Unsupported GitHub blob encoding: ${blob.encoding}`);
     }
-    return response.json;
+    return base64ToBytes(blob.content);
   }
 
-  /**
-   * Create a new file in the repo, the content must be base64 encoded or the request will fail.
-   *
-   * @param path Path to create in the repo
-   * @param content Base64 encoded content of the file
-   * @param message Commit message
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   */
-  async createFile({
-    path,
-    content,
-    message,
-    retry = false,
-    maxRetries = 5,
-  }: {
-    path: string;
-    content: string;
-    message: string;
-    retry?: boolean;
-    maxRetries?: number;
-  }) {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/contents/${path}`,
-          headers: this.headers(),
-          method: "PUT",
-          body: JSON.stringify({
-            message: message,
-            content: content,
-            branch: this.settings.githubBranch,
-          }),
-          throw: false,
-        });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
-    );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to create file", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to create file, status ${response.status}`,
-      );
-    }
+  async createBlob(bytes: Uint8Array): Promise<string> {
+    const response = await this.request("POST", "/git/blobs", {
+      content: bytesToBase64(bytes),
+      encoding: "base64",
+    });
+    this.assertSuccess(response, "create blob");
+    return (response.json as { sha: string }).sha;
   }
 
-  /**
-   * Downloads the repository as a ZIP archive from GitHub.
-   *
-   * @param retry Whether to retry the request on failure (default: false)
-   * @param maxRetries Maximum number of retry attempts (default: 5)
-   * @returns The archive contents as an ArrayBuffer
-   */
-  async downloadRepositoryArchive({
-    retry = false,
-    maxRetries = 5,
-  } = {}): Promise<ArrayBuffer> {
-    const response = await retryUntil(
-      async () => {
-        return requestUrl({
-          url: `https://api.github.com/repos/${this.settings.githubOwner}/${this.settings.githubRepo}/zipball/${this.settings.githubBranch}`,
-          headers: this.headers(),
-          method: "GET",
+  async createTree(entries: GitTreeEntry[]): Promise<string> {
+    const response = await this.request("POST", "/git/trees", { tree: entries });
+    this.assertSuccess(response, "create tree");
+    return (response.json as { sha: string }).sha;
+  }
+
+  async createCommit(
+    treeSha: string,
+    parentSha: string | null,
+    message: string,
+  ): Promise<string> {
+    const response = await this.request("POST", "/git/commits", {
+      message,
+      tree: treeSha,
+      parents: parentSha ? [parentSha] : [],
+    });
+    this.assertSuccess(response, "create commit");
+    return (response.json as { sha: string }).sha;
+  }
+
+  async createInitialFile(
+    path: string,
+    bytes: Uint8Array,
+    message: string,
+  ): Promise<string> {
+    const response = await this.request(
+      "PUT",
+      `/contents/${encodePath(path)}`,
+      { message, content: bytesToBase64(bytes) },
+    );
+    this.assertSuccess(response, "initialize empty repository");
+    return (response.json as { commit: { sha: string } }).commit.sha;
+  }
+
+  async updateMainWithoutForce(commitSha: string): Promise<void> {
+    const ref = `heads/${this.settings.githubBranch}`;
+    const response = await this.request("PATCH", `/git/refs/${encodeRef(ref)}`, {
+      sha: commitSha,
+      force: false,
+    });
+    this.assertSuccess(response, "advance main branch");
+  }
+
+  async createReference(branchName: string, commitSha: string): Promise<void> {
+    const response = await this.request("POST", "/git/refs", {
+      ref: `refs/heads/${branchName}`,
+      sha: commitSha,
+    });
+    this.assertSuccess(response, `create recovery branch ${branchName}`);
+  }
+
+  async getReference(branchName: string): Promise<string | null> {
+    const response = await this.request(
+      "GET",
+      `/git/ref/${encodeRef(`heads/${branchName}`)}`,
+    );
+    if (response.status === 404) return null;
+    this.assertSuccess(response, `verify recovery branch ${branchName}`);
+    return (response.json as { object: { sha: string } }).object.sha;
+  }
+
+  private async request(
+    method: string,
+    path: string,
+    body?: object,
+  ): Promise<RequestUrlResponse> {
+    const url = `https://api.github.com/repos/${encodeURIComponent(
+      this.settings.githubOwner,
+    )}/${encodeURIComponent(this.settings.githubRepo)}${path}`;
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await requestUrl({
+          url,
+          method,
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${this.settings.githubToken}`,
+            "X-GitHub-Api-Version": API_VERSION,
+            "Content-Type": "application/json",
+          },
+          body: body ? JSON.stringify(body) : undefined,
           throw: false,
         });
-      },
-      (res) => res.status !== 422,
-      retry ? maxRetries : 0,
-    );
-
-    if (response.status < 200 || response.status >= 400) {
-      await this.logger.error("Failed to download zip archive", response);
-      throw new GithubAPIError(
-        response.status,
-        `Failed to download zip archive, status ${response.status}`,
-      );
+        if (!TRANSIENT_STATUSES.has(response.status) || attempt === MAX_ATTEMPTS - 1) {
+          return response;
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt === MAX_ATTEMPTS - 1) throw error;
+      }
+      await sleep(500 * 2 ** attempt);
     }
-    return response.arrayBuffer;
+    throw lastError instanceof Error ? lastError : new Error("GitHub request failed");
   }
+
+  private assertSuccess(response: RequestUrlResponse, operation: string): void {
+    if (response.status >= 200 && response.status < 300) return;
+    const message = (response.json as { message?: string } | null)?.message;
+    throw new GitHubApiError(
+      response.status,
+      `Unable to ${operation} (GitHub ${response.status}${message ? `: ${message}` : ""})`,
+    );
+  }
+}
+
+function encodePath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function encodeRef(ref: string): string {
+  return ref.split("/").map(encodeURIComponent).join("/");
 }
