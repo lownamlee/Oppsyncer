@@ -43,11 +43,20 @@ recovery branch.
 
 ## Automatic behavior
 
-- Local edits synchronize after three seconds of inactivity by default.
-- Remote changes are polled every 15 seconds while Obsidian is visible.
+- Local edits synchronize after two seconds of inactivity by default.
+- Remote changes are polled every five seconds by default. Desktop polling keeps
+  running while the Obsidian window is hidden or minimized, as long as the app
+  itself remains open.
 - Opening the vault or returning to the foreground requests reconciliation.
 - Mobile operating systems may suspend Obsidian; synchronization resumes when
   Obsidian becomes active again.
+
+Common small edits use GitHub's atomic commit mutation: the expected remote head,
+file changes, commit, and branch update are handled in one request. A stale device
+is rejected before the branch moves and follows the same verified recovery path.
+Large batches retain the Git Database fallback. Unchanged remote polls use ETags,
+and unchanged local files reuse their size, modification time, and verified Git
+blob hash.
 
 ## Obsidian configuration
 
@@ -56,8 +65,8 @@ vault's configuration folder, normally `.obsidian`. This includes application
 settings, hotkeys, themes, snippets, community-plugin code and settings, and
 stable plugin data such as LearnKit's committed SQLite database files.
 
-Hidden configuration changes are discovered by the startup/foreground scan and
-the foreground poller. Some settings and newly downloaded plugins require an
+Hidden configuration changes are discovered by startup/foreground scans and a
+periodic full inventory. Some settings and newly downloaded plugins require an
 Obsidian restart before the app uses them.
 
 The following remain device-local regardless of user exclusions:
@@ -85,6 +94,11 @@ limited to that repository with **Contents: Read and write**.
    **Sync now** to download the remote vault.
 5. Leave **Automatic synchronization** enabled. Oppsyncer syncs after local edits
    settle and polls for remote changes while the app is active.
+
+The local vault name is only a display name. For example, a desktop vault named
+`Obsidian Vault` and a mobile vault named `Testing` can safely use the same
+repository. Oppsyncer pairs them using a repository identity stored at
+`.obsyncer/vault.json`; it does not require folder or vault names to match.
 
 The first setup must have one empty side:
 

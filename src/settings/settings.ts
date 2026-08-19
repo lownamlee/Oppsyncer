@@ -36,8 +36,8 @@ export const DEFAULT_SETTINGS: ObSyncerSettings = {
   deviceName: "",
   autoSync: true,
   syncObsidianConfig: false,
-  editDebounceSeconds: 3,
-  remotePollSeconds: 15,
+  editDebounceSeconds: 2,
+  remotePollSeconds: 5,
   excludedPatterns: [],
   showStatusBar: true,
 };

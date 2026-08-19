@@ -1,13 +1,16 @@
 import { DEFAULT_SETTINGS, ObSyncerSettings } from "./settings/settings";
 
-export const DATA_SCHEMA_VERSION = 1;
+export const DATA_SCHEMA_VERSION = 3;
 
 export interface ObSyncerState {
   schemaVersion: number;
   deviceId: string;
+  vaultId: string | null;
+  vaultIdentityBlobSha: string | null;
   baselineCommitSha: string | null;
   baselineTreeSha: string | null;
   baselineFiles: Record<string, string>;
+  localFiles: Record<string, LocalFileState>;
   lastSuccessfulSyncAt: number;
   lastRecoveryRef: string | null;
 }
@@ -17,10 +20,16 @@ export interface ObSyncerData {
   state: ObSyncerState;
 }
 
+export interface RawObSyncerData {
+  settings?: Partial<ObSyncerSettings>;
+  state?: Partial<ObSyncerState>;
+}
+
 export interface LocalFileState {
   path: string;
   sha: string;
   size: number;
+  mtime: number;
 }
 
 export interface LocalSnapshot {
@@ -45,6 +54,7 @@ export type SyncTrigger =
   | "startup"
   | "foreground"
   | "background"
+  | "file-open"
   | "edit"
   | "poll"
   | "manual";
@@ -84,16 +94,19 @@ export function defaultState(): ObSyncerState {
   return {
     schemaVersion: DATA_SCHEMA_VERSION,
     deviceId: createDeviceId(),
+    vaultId: null,
+    vaultIdentityBlobSha: null,
     baselineCommitSha: null,
     baselineTreeSha: null,
     baselineFiles: {},
+    localFiles: {},
     lastSuccessfulSyncAt: 0,
     lastRecoveryRef: null,
   };
 }
 
 export function normalizeData(
-  raw: Partial<ObSyncerData> | null | undefined,
+  raw: RawObSyncerData | null | undefined,
   defaultDeviceName: string,
 ): ObSyncerData {
   const settings: ObSyncerSettings = {
@@ -123,16 +136,42 @@ export function normalizeData(
     ...candidate,
     schemaVersion: DATA_SCHEMA_VERSION,
     deviceId: String(candidate.deviceId || initialState.deviceId),
+    vaultId: candidate.vaultId ? String(candidate.vaultId) : null,
+    vaultIdentityBlobSha: candidate.vaultIdentityBlobSha
+      ? String(candidate.vaultIdentityBlobSha)
+      : null,
     baselineCommitSha: candidate.baselineCommitSha || null,
     baselineTreeSha: candidate.baselineTreeSha || null,
     baselineFiles:
       candidate.baselineFiles && typeof candidate.baselineFiles === "object"
         ? candidate.baselineFiles
         : {},
+    localFiles: normalizeLocalFiles(candidate.localFiles),
     lastRecoveryRef: candidate.lastRecoveryRef || null,
   };
 
   return { settings, state };
+}
+
+function normalizeLocalFiles(
+  candidate: unknown,
+): Record<string, LocalFileState> {
+  if (!candidate || typeof candidate !== "object") return {};
+  const result: Record<string, LocalFileState> = {};
+  for (const [path, raw] of Object.entries(candidate)) {
+    if (!raw || typeof raw !== "object") continue;
+    const value = raw as Partial<LocalFileState>;
+    if (!value.sha || !Number.isFinite(value.size) || !Number.isFinite(value.mtime)) {
+      continue;
+    }
+    result[path] = {
+      path,
+      sha: String(value.sha),
+      size: Number(value.size),
+      mtime: Number(value.mtime),
+    };
+  }
+  return result;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

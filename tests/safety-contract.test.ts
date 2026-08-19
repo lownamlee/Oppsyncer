@@ -4,6 +4,7 @@ import test from "node:test";
 
 const clientSource = readFileSync("src/github/client.ts", "utf8");
 const engineSource = readFileSync("src/sync/sync-engine.ts", "utf8");
+const mainSource = readFileSync("src/main.ts", "utf8");
 const settingsSource = readFileSync("src/settings/settings.ts", "utf8");
 
 test("the coordinated branch can only receive a non-forced update", () => {
@@ -13,6 +14,19 @@ test("the coordinated branch can only receive a non-forced update", () => {
 
 test("both GitHub ref-race status codes enter recovery", () => {
   assert.match(engineSource, /\[409, 422\]\.includes\(error\.status\)/);
+});
+
+test("the atomic fast path preserves first-writer-wins semantics", () => {
+  assert.match(clientSource, /expectedHeadOid:\s*expectedHeadSha/);
+  assert.match(clientSource, /error\.type === "STALE_DATA"/);
+  assert.match(engineSource, /recoverRejectedPush\(client, candidate, local, settings\)/);
+});
+
+test("desktop polling continues while its window is hidden", () => {
+  assert.match(
+    mainSource,
+    /Platform\.isDesktopApp \|\| document\.visibilityState === "visible"/,
+  );
 });
 
 test("recovery is verified before a dirty local snapshot is materialized", () => {
@@ -35,4 +49,22 @@ test("local plugin credentials, volatile config, and Git metadata are fixed excl
 
 test("public repositories are rejected before synchronization", () => {
   assert.match(engineSource, /Refusing to synchronize notes with a public repository/);
+});
+
+test("incremental commits use a base tree and explicit deletions", () => {
+  assert.match(engineSource, /client\.createTree\(entries, parent\.treeSha\)/);
+  assert.match(engineSource, /sha:\s*null/);
+});
+
+test("remote vault identity is independent of the local display name", () => {
+  assert.match(engineSource, /VAULT_IDENTITY_PATH = "\.obsyncer\/vault\.json"/);
+  assert.match(engineSource, /displayName:\s*this\.vault\.getName\(\)/);
+  assert.match(
+    engineSource,
+    /identityState\.vaultIdentityBlobSha === identityFile\.sha/,
+  );
+  assert.doesNotMatch(
+    engineSource,
+    /identity\.displayName\s*!==\s*this\.vault\.getName/,
+  );
 });

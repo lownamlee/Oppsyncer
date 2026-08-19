@@ -3,6 +3,7 @@ import {
   Platform,
   Plugin,
   TAbstractFile,
+  TFile,
 } from "obsidian";
 import {
   normalizeData,
@@ -16,6 +17,7 @@ import { settingsAreConfigured } from "./settings/settings";
 import SyncEngine from "./sync/sync-engine";
 
 export default class ObSyncerPlugin extends Plugin {
+  private static readonly LOCAL_INVENTORY_INTERVAL_MS = 2 * 60 * 1000;
   data!: ObSyncerData;
   private engine!: SyncEngine;
   private statusBar: HTMLElement | null = null;
@@ -29,6 +31,10 @@ export default class ObSyncerPlugin extends Plugin {
   private applyingRemote = false;
   private persistQueue: Promise<void> = Promise.resolve();
   private lastReportedError = "";
+  private dirtyPaths = new Map<string, number>();
+  private localGeneration = 0;
+  private lastLocalInventoryAt = 0;
+  private fullInventoryRequested = true;
 
   async onload(): Promise<void> {
     const raw = (await this.loadData()) as Partial<ObSyncerData> | null;
@@ -47,6 +53,7 @@ export default class ObSyncerPlugin extends Plugin {
       setApplyingRemote: (applying) => {
         this.applyingRemote = applying;
       },
+      getLocalGeneration: () => this.localGeneration,
     });
 
     this.addSettingTab(new ObSyncerSettingsTab(this.app, this));
@@ -99,6 +106,7 @@ export default class ObSyncerPlugin extends Plugin {
   async savePluginData(restartPoller = false): Promise<void> {
     await this.persistData();
     if (restartPoller) this.restartPoller();
+    if (restartPoller) this.fullInventoryRequested = true;
     this.configureStatusBar();
     this.updateConfiguredStatus();
   }
@@ -142,6 +150,12 @@ export default class ObSyncerPlugin extends Plugin {
         return;
       }
       if (!this.engine.isIncluded(file.path)) return;
+      this.localGeneration++;
+      if (file instanceof TFile) {
+        this.dirtyPaths.set(file.path, this.localGeneration);
+      } else {
+        this.fullInventoryRequested = true;
+      }
       this.scheduleEditSync();
     };
     this.registerEvent(this.app.vault.on("create", schedule));
@@ -161,7 +175,29 @@ export default class ObSyncerPlugin extends Plugin {
           this.rerunTrigger = "edit";
           return;
         }
+        this.localGeneration++;
+        if (file instanceof TFile) {
+          if (this.engine.isIncluded(oldPath)) {
+            this.dirtyPaths.set(oldPath, this.localGeneration);
+          }
+          if (this.engine.isIncluded(file.path)) {
+            this.dirtyPaths.set(file.path, this.localGeneration);
+          }
+        } else {
+          this.fullInventoryRequested = true;
+        }
         this.scheduleEditSync();
+      }),
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        if (
+          document.visibilityState === "visible" &&
+          this.data.settings.autoSync &&
+          settingsAreConfigured(this.data.settings)
+        ) {
+          void this.requestSync("file-open");
+        }
       }),
     );
   }
@@ -187,7 +223,7 @@ export default class ObSyncerPlugin extends Plugin {
       return;
     }
     this.pollTimer = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
+      if (Platform.isDesktopApp || document.visibilityState === "visible") {
         void this.requestSync("poll");
       }
     }, this.data.settings.remotePollSeconds * 1000);
@@ -222,9 +258,48 @@ export default class ObSyncerPlugin extends Plugin {
       return;
     }
 
-    this.setStatus("syncing", `Running ${trigger} synchronization`);
     try {
-      const outcome = await this.engine.sync();
+      const generationAtStart = this.localGeneration;
+      const capturedDirty = new Map(this.dirtyPaths);
+      const inventoryDue =
+        Date.now() - this.lastLocalInventoryAt >=
+        ObSyncerPlugin.LOCAL_INVENTORY_INTERVAL_MS;
+      const scanAll =
+        trigger === "startup" ||
+        trigger === "foreground" ||
+        trigger === "manual" ||
+        this.fullInventoryRequested ||
+        inventoryDue;
+      let remoteHeadWasChecked = false;
+      let remoteHead: string | null = null;
+
+      if (
+        !scanAll &&
+        capturedDirty.size === 0 &&
+        (trigger === "poll" || trigger === "file-open")
+      ) {
+        const remoteCheck = await this.engine.checkRemoteHead();
+        remoteHeadWasChecked = true;
+        remoteHead = remoteCheck.head;
+        if (!remoteCheck.changed) {
+          this.lastReportedError = "";
+          this.setStatus("idle", "Remote branch unchanged");
+          return;
+        }
+      }
+
+      this.setStatus("syncing", `Running ${trigger} synchronization`);
+      const outcome = await this.engine.sync({
+        dirtyPaths: scanAll ? undefined : [...capturedDirty.keys()],
+        forceHash: trigger === "manual",
+        remoteHead,
+        remoteHeadWasChecked,
+      });
+      this.clearCapturedDirty(capturedDirty);
+      if (scanAll) {
+        this.lastLocalInventoryAt = Date.now();
+        this.fullInventoryRequested = this.localGeneration !== generationAtStart;
+      }
       this.lastReportedError = "";
       this.handleOutcome(outcome, trigger);
     } catch (error) {
@@ -234,6 +309,14 @@ export default class ObSyncerPlugin extends Plugin {
         new Notice(`Oppsyncer: ${message}`, trigger === "manual" ? 0 : 8000);
       }
       this.lastReportedError = message;
+    }
+  }
+
+  private clearCapturedDirty(captured: Map<string, number>): void {
+    for (const [path, generation] of captured) {
+      if (this.dirtyPaths.get(path) === generation) {
+        this.dirtyPaths.delete(path);
+      }
     }
   }
 
